@@ -1,2 +1,2 @@
 # This Building Does Not Exist
-A site in the style of (This Person Does Not Exist)[https://thispersondoesnotexist.com] to showcase the power of deep learning in architecture.
+A site in the style of [This Person Does Not Exist](https://thispersondoesnotexist.com) to showcase the power of deep learning in architecture.

@@ -3,12 +3,19 @@ using CuArrays
 # Array -> Image
 
 # Mapping Network
-function mapping_network(z)
-    mlp = [Dense(512, 512) for n in 1:8]
+function mapping_network(z::AbstractArray)
 
-    return foldl((z, m) -> m(z), mlp, init = z)
+    batch_size, z_dim = size(z)
+
+    zb = batch_size * z_dim
+
+    mlp = [Dense(zb, zb) for n in 1:8]
+
+    w = foldl((x, m) -> m(x), mlp, init = vcat(z...))
+
+    return reshape(w, batch_size, z_dim)
 end
 
-z = rand(512)
+z = cu(rand(Float32, (1, 512)))
 w = mapping_network(z)
 print(w)

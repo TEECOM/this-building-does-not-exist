@@ -21,16 +21,6 @@ function mapping_network(z::AbstractArray)
     return reshape(w, batch_size, z_dim)
 end
 
-function synthesis_block()
-    # The typical blocks from the paper are formed from
-    # Upsample -> Conv 3x3 -> Addition(Noise) -> 
-end
-
-
-function synthesis_network(w::AbstractArray, noise::)
-
-end
-
 function main()
     z = cu(rand(Float32, (1, 512)))
     w = mapping_network(z)

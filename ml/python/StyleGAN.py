@@ -16,14 +16,6 @@ class MappingNetwork(nn.Sequential):
             self.add_module(layer_name, layer)
 
 
-class IdentityModule(nn.Module):
-    def __init__(self):
-        super(IdentityModule, self).__init__()
-    
-    def forward(self, x):
-        return x
-
-
 class Generator:
     """
     See https://arxiv.org/pdf/1812.04948.pdf section 2 for definition

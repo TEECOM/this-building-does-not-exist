@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as nnf
 
-#region MappingNetwork Definitions
 
 class MappingNetwork(nn.Sequential):
     """
@@ -16,7 +15,15 @@ class MappingNetwork(nn.Sequential):
             layer = nn.Linear(latent_dim, latent_dim)
             self.add_module(layer_name, layer)
 
-#endregion
+
+class IdentityModule(nn.Module):
+    def __init__(self):
+        super(IdentityModule, self).__init__()
+    
+    def forward(self, x):
+        return x
+
+
 class Generator:
     """
     See https://arxiv.org/pdf/1812.04948.pdf section 2 for definition
@@ -82,6 +89,9 @@ class Generator:
     class ConvBlock(nn.Module):
         def __init__(self, in_channels, out_channels):
             super(Generator.ConvBlock, self).__init__()
+
+            self.in_channels = in_channels
+            self.out_channels = out_channels
             
             self.conv = nn.Conv2d(in_channels, out_channels, (3, 3), 1, 1)
             self.conv.weight.data.normal_(0, 1)
@@ -177,11 +187,18 @@ class Generator:
             return {"x": x, "w": w}
 
 
-    class FadeIn(nn.Module):
+    class FadeIn(nn.Sequential):
+        """
+        See https://arxiv.org/pdf/1710.10196.pdf section 3 for definition
+        """
         def __init__(self):
             super(Generator.FadeIn, self).__init__()
 
             self.alpha = 0
+
+        def add_fade_layer(self, layer):
+            self.add_module("fade_in", layer)
+            self.add_module("output", Generator.OutputBlock(layer.conv1.out_channels))
 
 
     class StyleGenerator(nn.Module):
@@ -192,6 +209,8 @@ class Generator:
                 input_layer = Generator.InputBlock(512, 512, 4, 4, w_dim=w_dim)
             
             self.input = input_layer
+
+            self.fade_in = FadeIn()
 
             self.main = nn.Sequential()
 
@@ -235,69 +254,81 @@ class Generator:
 
 #region Discriminator Definitions
 
-class DiscriminatorBlock(nn.Sequential):
-    
-    def __init__(self, in_channels, out_channels):
-        super(DiscriminatorBlock, self).__init__()
-    
-        layers = [
-            ("conv0",      nn.Conv2d(in_channels, out_channels, (3, 3), 1, 1)),
-            ("act0",       nn.LeakyReLU(negative_slope=0.2)),
-            ("conv1",      nn.Conv2d(out_channels, out_channels, (3, 3), 1, 1)),
-            ("act1",       nn.LeakyReLU(negative_slope=0.2)),
-            ("downsample", nn.AvgPool2d((2, 2)))
-        ]
+class Discriminator:
+    """
+    See https://arxiv.org/pdf/1710.10196.pdf appendix A for definition
+    """
+    class ConvBlock(nn.Sequential):
         
-        [self.add_module(n, l) for n, l in layers]
-
-
-class StyleDiscriminator(nn.Module):
-    
-    def __init__(self, layer_params=None):
-        super(StyleDiscriminator, self).__init__()
-
-        self.input = None
-
-        self.main = nn.Sequential()
+        def __init__(self, in_channels, out_channels):
+            super(DiscriminatorBlock, self).__init__()
         
-        if layer_params == None:
-            layer_params = [
-                ( 32,  64),
-                ( 64, 128),
-                (128, 256),
-                (256, 512),
-                (512, 512),
-                (512, 512),
-                (512, 512),
+            layers = [
+                ("conv0",      nn.Conv2d(in_channels, out_channels, (3, 3), 1, 1)),
+                ("act0",       nn.LeakyReLU(negative_slope=0.2)),
+                ("conv1",      nn.Conv2d(out_channels, out_channels, (3, 3), 1, 1)),
+                ("act1",       nn.LeakyReLU(negative_slope=0.2)),
+                ("downsample", nn.AvgPool2d((2, 2)))
             ]
+            
+            [self.add_module(n, l) for n, l in layers]
+
+
+    class StyleDiscriminator(nn.Module):
         
-        self.layer_params = layer_params
-    
-    def step_training_progression(self):
+        def __init__(self, layer_params=None):
+            super(StyleDiscriminator, self).__init__()
+
+            self.input = None
+
+            self.main = nn.Sequential()
+            
+            if layer_params == None:
+                layer_params = [
+                    ( 32,  64),
+                    ( 64, 128),
+                    (128, 256),
+                    (256, 512),
+                    (512, 512),
+                    (512, 512),
+                    (512, 512),
+                ]
+            
+            self.layer_params = layer_params
         
-        current_layer_count = len(list(self.main.children()))
+        def step_training_progression(self):
+            
+            current_layer_count = len(list(self.main.children()))
+            
+            if len(self.layer_params) == 0:
+                return
+            
+            new_layer_params = self.layer_params.pop(0)
+            
+            final_out_channels = new_layer_params[1]
+            
+            self.main.add_module("db{}".format(current_layer_count), DiscriminatorBlock(*new_layer_params))
+            print("Added block with params:{}\n".format(new_layer_params))
+            
+            # self.output = OutputBlock(final_out_channels)
         
-        if len(self.layer_params) == 0:
-            return
-        
-        new_layer_params = self.layer_params.pop(0)
-        
-        final_out_channels = new_layer_params[1]
-        
-        self.main.add_module("db{}".format(current_layer_count), DiscriminatorBlock(*new_layer_params))
-        print("Added block with params:{}\n".format(new_layer_params))
-        
-        # self.output = OutputBlock(final_out_channels)
-    
-    def forward(self, x):
-        x = self.main(x)
-        return x
+        def forward(self, x):
+            x = self.main(x)
+            return x
 
 #endregion
 
 #region Testing
 if __name__ == "__main__":
-    sg = Generator.StyleGenerator()
+    f = Generator.FadeIn()
+    l = Generator.SynthesisBlock(4, 8, 16, 16)
 
-    print(sg)
+    f.add_fade_layer(l)
+
+    x = torch.randn(1, 4, 8, 8)
+    w = torch.randn(1, 512)
+
+    td = {"x": x, "w": w}
+
+    print(f(td))
 #endregion

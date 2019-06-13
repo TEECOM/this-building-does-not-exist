@@ -16,6 +16,15 @@ class MappingNetwork(nn.Sequential):
             self.add_module(layer_name, layer)
 
 
+class TensorMap:
+    def __init__(self, x, w):
+        self.x = x
+        self.w = w
+    
+    def __repr__(self):
+        return "x: {} w: {}".format(self.x.shape, self.w.shape)
+
+
 class Generator:
     """
     See https://arxiv.org/pdf/1812.04948.pdf section 2 for definition
@@ -115,10 +124,10 @@ class Generator:
             self.a1 =       Generator.A(out_channels, w_dim=w_dim)
             self.adain1 =   Generator.AdaIN()
         
-        def forward(self, tensor_dict):
+        def forward(self, tensor_map):
 
-            x = tensor_dict["x"]
-            w = tensor_dict["w"]
+            x = tensor_map.x
+            w = tensor_map.w
             
             x = self.upsample(x)
             x = self.conv0(x)
@@ -130,14 +139,18 @@ class Generator:
             x = x + self.b1()
             y = self.a1(w)
             x = self.adain1(x, y)
+
+            tensor_map.x = x
+            tensor_map.w = w
             
-            return {"x": x, "w": w}
+            return tensor_map
 
 
     class InputBlock(nn.Module):
-        def __init__(self, in_channels, out_channels, height, width, w_dim=512):
+        def __init__(self, batch_size, in_channels, out_channels, height, width, w_dim=512):
             super(Generator.InputBlock, self).__init__()
             
+            self.constant = torch.nn.Parameter(data=torch.randn(batch_size, in_channels, height, width), requires_grad=True)
             self.conv0 =    Generator.ConvBlock(in_channels, out_channels)
             self.b0 =       Generator.B(height, width, out_channels)
             self.a0 =       Generator.A(out_channels, w_dim=w_dim)
@@ -147,12 +160,11 @@ class Generator:
             self.a1 =       Generator.A(out_channels, w_dim=w_dim)
             self.adain1 =   Generator.AdaIN()
         
-        def forward(self, tensor_dict):
+        def forward(self, tensor_map):
 
-            x = tensor_dict["x"]
-            w = tensor_dict["w"]
+            w = tensor_map.w
             
-            x = self.conv0(x)
+            x = self.conv0(self.constant)
             x = x + self.b0()
             y = self.a0(w)
             x = self.adain0(x, y)
@@ -160,8 +172,11 @@ class Generator:
             x = x + self.b1()
             y = self.a1(w)
             x = self.adain1(x, y)
+
+            tensor_map.x = x
+            tensor_map.w = w
             
-            return {"x": x, "w": w}
+            return tensor_map
 
 
     class OutputBlock(nn.Module):
@@ -170,13 +185,16 @@ class Generator:
             
             self.to_rgb = nn.Conv2d(input_channels, 3, (1, 1))
         
-        def forward(self, tensor_dict):
-            x = tensor_dict["x"]
-            w = tensor_dict["w"]
+        def forward(self, tensor_map):
+            x = tensor_map.x
+            w = tensor_map.w
             
             x = self.to_rgb(x)
+
+            tensor_map.x = x
+            tensor_map.w = w
             
-            return {"x": x, "w": w}
+            return tensor_map
 
 
     class FadeIn(nn.Sequential):
@@ -194,15 +212,15 @@ class Generator:
 
 
     class StyleGenerator(nn.Module):
-        def __init__(self, input_layer=None, layer_params=None, w_dim=512):
+        def __init__(self, batch_size, input_layer=None, layer_params=None, w_dim=512):
             super(Generator.StyleGenerator, self).__init__()
             
             if input_layer == None:
-                input_layer = Generator.InputBlock(512, 512, 4, 4, w_dim=w_dim)
+                input_layer = Generator.InputBlock(batch_size, 512, 512, 4, 4, w_dim=w_dim)
             
             self.input = input_layer
 
-            self.fade_in = FadeIn()
+            self.fade_in = Generator.FadeIn()
 
             self.main = nn.Sequential()
 
@@ -233,16 +251,16 @@ class Generator:
             
             final_out_channels = new_layer_params[1]
             
-            self.main.add_module("sb{}".format(current_layer_count), SynthesisBlock(*new_layer_params))
+            self.main.add_module("sb{}".format(current_layer_count), Generator.SynthesisBlock(*new_layer_params))
             print("Added block with params:{}\n".format(new_layer_params))
             
-            self.output = OutputBlock(final_out_channels)
+            self.output = Generator.OutputBlock(final_out_channels)
 
-        def forward(self, tensor_dict):
-            tensor_dict = self.input(tensor_dict)
-            tensor_dict = self.main(tensor_dict)
+        def forward(self, tensor_map):
+            tensor_map = self.input(tensor_map)
+            tensor_map = self.main(tensor_map)
 
-            return self.output(tensor_dict)
+            return self.output(tensor_map)
 
 #region Discriminator Definitions
 
@@ -312,15 +330,17 @@ class Discriminator:
 
 #region Testing
 if __name__ == "__main__":
-    f = Generator.FadeIn()
-    l = Generator.SynthesisBlock(4, 8, 16, 16)
 
-    f.add_fade_layer(l)
-
-    x = torch.randn(1, 4, 8, 8)
+    x = torch.randn(1, 512, 4, 4)
     w = torch.randn(1, 512)
 
-    td = {"x": x, "w": w}
+    tm = TensorMap(None, w)
 
-    print(f(td))
+    sg = Generator.StyleGenerator(8)
+    sg.step_training_progression()
+
+    out = sg(tm)
+
+    print(tm)
+
 #endregion

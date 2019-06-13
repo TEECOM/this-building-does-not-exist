@@ -256,10 +256,6 @@ class StyleDiscriminator(nn.Module):
         self.layer_params = layer_params
     
     def step_training_progression(self):
-        for child in self.main.children():
-            for p in child.parameters():
-                p.requires_grad = False
-                # Check that Progressive Growing of GANs actually freezes layers
         
         current_layer_count = len(list(self.main.children()))
         

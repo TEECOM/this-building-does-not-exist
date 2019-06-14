@@ -296,8 +296,11 @@ class Generator:
             if len(self.layer_params) == 0:
                 print("All blocks are added")
                 pre_output_channels = self.move_fade_layer()
+
                 if pre_output_channels != 0:
+                    input("waiting")
                     self.output = Generator.OutputBlock(pre_output_channels)
+
                 self.alpha = 1
                 return
             
@@ -383,7 +386,7 @@ class Generator:
                 return (self.upsample(tm_out.x) * (1.0 - self.alpha)) + (self.alpha * tm_fade.x)
 
 
-    def train(dataset, n_epochs=12):
+    def train(dataset, n_epochs=11):
         N_BATCHES = len(dataset)
 
         sg = Generator.StyleGenerator(N_BATCHES)
@@ -486,19 +489,10 @@ class Discriminator:
             
             self.layer_params = layer_params
         
-        def step_training_progression(self):
-            
-            current_layer_count = len(list(self.main.children()))
-            
+        def step_training_progression(self, epoch_number):
             if len(self.layer_params) == 0:
-                return
+                print("All blocks added")
             
-            new_layer_params = self.layer_params.pop(0)
-            
-            final_out_channels = new_layer_params[1]
-            
-            self.main.add_module("db{}".format(current_layer_count), DiscriminatorBlock(*new_layer_params))
-            print("Added block with params:{}\n".format(new_layer_params))
             
             # self.output = OutputBlock(final_out_channels)
         

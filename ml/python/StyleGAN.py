@@ -381,12 +381,6 @@ class Generator:
                 return tm_out.x
             else:
                 return (self.upsample(tm_out.x) * (1.0 - self.alpha)) + (self.alpha * tm_fade.x)
-    
-
-    class SGDataParallel(nn.DataParallel):
-
-        def step_training_progression(self, epoch_number):
-            self.module.step_training_progression(epoch_number)
 
 
     def train(dataset, n_epochs=12):
@@ -400,7 +394,7 @@ class Generator:
 
             for batch_number, (data, label) in enumerate(dataset):
 
-                current_batch_size = 4
+                current_batch_size = 2
 
                 z = torch.randn(current_batch_size, 512, 1, 1).cuda()
 
@@ -424,6 +418,31 @@ class Generator:
             print("EPOCH {:4d} DONE".format(epoch_number))
             print(10 * "-")
     
+    def get_max_batch_size(cuda=True):
+        sg = Generator.StyleGenerator(1)
+
+        sg.add_layers(8)
+
+        batch_size = 1
+
+        while True:
+            try:
+                z = torch.randn(batch_size, 512, 1, 1, requires_grad=True)
+                if cuda:
+                    sg.cuda()
+                    z = z.cuda()
+                
+                out = sg(batch_size, z)
+
+                out.mean().backward()
+
+                sg.zero_grad()
+
+                batch_size += 1
+            
+            except Exception as e:
+                print(e)
+                break
 
 class Discriminator:
     """

@@ -232,6 +232,9 @@ class Generator:
             self.main.add_module("fade_in", layer)
             self.main.add_module("output", Generator.OutputBlock(layer.conv1.out_channels))
         
+        def pop_layer(self):
+            
+        
         def clear(self):
             del(self.main.fade_in)
             del(self.main.output)
@@ -241,24 +244,17 @@ class Generator:
 
 
     class StyleGenerator(nn.Module):
-        def __init__(self, n_batches, input_layer=None, layer_params=None, w_dim=512):
+        def __init__(self, input_layer=None, layer_params=None, w_dim=512):
             super(Generator.StyleGenerator, self).__init__()
 
             if input_layer == None:
                 input_layer = Generator.InputBlock(512, 512, 4, 4, w_dim=w_dim)
             
-            self.n_batches = n_batches
-            
-            self.init_alpha()
-
-            self.mapping_network = MappingNetwork(latent_dim=w_dim)
-            
             self.input = input_layer
 
             self.main = nn.Sequential()
 
-            self.fade_in = Generator.FadeIn()
-
+            self.fading_in = nn.Sequential()
 
             if layer_params == None:
                 layer_params = [
@@ -271,119 +267,31 @@ class Generator:
                     ( 64,  32,  512,  512, w_dim),
                     ( 32,  16, 1024, 1024, w_dim),
                 ]
-            
+
             self.layer_params = layer_params
             
-            self.main_layer_count = len(self.layer_params)
-
+            self.synthesis_blocks = [("sb{}".format(n), Generator.SynthesisBlock(*params)) for n, params in enumerate(self.layer_params)]
+            
             self.output = Generator.OutputBlock(input_layer.conv0.out_channels)
 
             self.upsample = None
         
-        def init_alpha(self):
-            self.alpha_step = (1 / self.n_batches)
-            
-            self.alpha_progression = list(torch.arange(0, 1 + self.alpha_step, self.alpha_step, dtype=torch.float32).flip(0))
-            
-            self.alpha = 0
-        
-        def step_alpha(self):
-            if len(self.alpha_progression) == 0:
-                return
-            self.alpha = self.alpha_progression.pop(0)
-
-
-        def step_training_progression(self, epoch_number):
-            """
-            This is meant to be called once per epoch to add the next layer in the progression.
-            """
-            if len(self.layer_params) == 0:
-                print("All blocks are added")
-                pre_output_channels = self.move_fade_layer()
-
-                if pre_output_channels != 0:
-                    self.output = Generator.OutputBlock(pre_output_channels)
-
-                self.alpha = 1
-                return
-            
-            self.init_alpha()
-
+        def epoch_training_step(self, epoch_number):
             if epoch_number == 0:
-                print("Training input block")
+                print("Training input layer. Adding no blocks.")
                 return
             
-            pre_output_channels = self.move_fade_layer()
-
-            new_layer_params = self.layer_params.pop(0)
-            new_layer = Generator.SynthesisBlock(*new_layer_params)
-
-            self.fade_in.add_fade_layer(new_layer)
-
-            self.upsample = new_layer.upsample
-
-            if pre_output_channels == 0:
-                pre_output_channels = self.input.conv0.out_channels
-            self.output = Generator.OutputBlock(pre_output_channels)
-
-
-        def move_fade_layer(self):
-            if len(list(self.fade_in.main.children())) == 0:
-                return 0
-            else:
-                layer_to_move = self.fade_in.main.fade_in
-                current_main_layer_count = len(list(self.main.children()))
-                self.main.add_module("sb{}".format(current_main_layer_count), layer_to_move)
-
-                pre_output_channels = layer_to_move.conv1.out_channels
-
-                self.fade_in.clear()
-
-                return pre_output_channels
-
-
-        def add_layers(self, num_layers):
-            if len(self.layer_params) == 0:
-                print("All blocks are added")
-                self.alpha = 1
+            if len(self.synthesis_blocks) == 0:
+                print("All blocks added. Adding no blocks.")
                 return
 
-            if num_layers >= self.main_layer_count or num_layers < 0:
-                count = self.main_layer_count
-            else:
-                count = num_layers
-            
-            for n in range(count):
-                new_layer_params = self.layer_params.pop(0)
-                layer = Generator.SynthesisBlock(*new_layer_params)
-                self.main.add_module("sb{}".format(n), layer)
-                print("Added block with params:{}\n".format(new_layer_params))
-            
-            self.output = Generator.OutputBlock(layer.conv1.out_channels)
+            name, next_block = self.synthesis_blocks.pop(0)
 
 
-        def forward(self, current_batch_size, z):
-            """
-            current_batch_size controls how many fake examples to create
-            """
-            self.step_alpha()
+            self.fading_in.add_module(name, next_block)
 
-            w = self.mapping_network(z)
-
-            tensor_map = TensorMap(None, w)
-
-            tensor_map = self.input(current_batch_size, tensor_map)
-            tensor_map = self.main(tensor_map)
-
-            tm_out = self.output(tensor_map)
-
-            tm_fade = self.fade_in(tensor_map)
-
-            if len(list(self.fade_in.main.children())) == 0:
-                # either training just the input, or we have added all SynthesisBlocks
-                return tm_out.x
-            else:
-                return (self.upsample(tm_out.x) * (1.0 - self.alpha)) + (self.alpha * tm_fade.x)
+            empty_main = len(list(self.main.children())) == 0
+            empty_fade = len(list(self.fading_in.children())) == 0
 
 
     def train(dataset, n_epochs=11):
@@ -505,7 +413,10 @@ class Discriminator:
 
 if __name__ == "__main__":
 
-    fake_dataset = [(None, None) for _ in range(10)]
+    sg = Generator.StyleGenerator()
 
-    Generator.train(fake_dataset)
+    sg.main.add_module(*sg.synthesis_blocks[0])
+
+    print(sg)
+    print(sg.synthesis_blocks)
 

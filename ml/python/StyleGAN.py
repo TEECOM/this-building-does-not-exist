@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as nnf
-from torchviz import make_dot
+#from torchviz import make_dot
 import matplotlib.pyplot as plt
 
 
@@ -67,7 +67,7 @@ class Generator:
             self.height = height
             self.num_features = num_features
             
-            self.noise_image = torch.randn(1, 1, height, width)
+            self.noise_image = torch.nn.Parameter(data=torch.randn(1, 1, height, width), requires_grad=False)
             
             self.scaling_factors = torch.nn.Parameter(data=torch.randn(1, num_features, 1, 1), requires_grad=True)
             
@@ -246,6 +246,8 @@ class Generator:
             self.n_batches = n_batches
             
             self.init_alpha()
+
+            self.mapping_network = MappingNetwork(latent_dim=w_dim)
             
             self.input = input_layer
 
@@ -294,7 +296,8 @@ class Generator:
             if len(self.layer_params) == 0:
                 print("All blocks are added")
                 pre_output_channels = self.move_fade_layer()
-                self.output = Generator.OutputBlock(pre_output_channels)
+                if pre_output_channels != 0:
+                    self.output = Generator.OutputBlock(pre_output_channels)
                 self.alpha = 1
                 return
             
@@ -353,11 +356,15 @@ class Generator:
             self.output = Generator.OutputBlock(layer.conv1.out_channels)
 
 
-        def forward(self, current_batch_size, tensor_map):
+        def forward(self, current_batch_size, z):
             """
             current_batch_size controls how many fake examples to create
             """
             self.step_alpha()
+
+            w = self.mapping_network(z)
+
+            tensor_map = TensorMap(None, w)
 
             tensor_map = self.input(current_batch_size, tensor_map)
             tensor_map = self.main(tensor_map)
@@ -373,28 +380,31 @@ class Generator:
                 # either training just the input, or we have added all SynthesisBlocks
                 return tm_out.x
             else:
-                return (self.upsample(tm_out.x) * (1 - self.alpha)) + (self.alpha * tm_fade.x)
+                return (self.upsample(tm_out.x) * (1.0 - self.alpha)) + (self.alpha * tm_fade.x)
+    
+
+    class SGDataParallel(nn.DataParallel):
+
+        def step_training_progression(self, epoch_number):
+            self.module.step_training_progression(epoch_number)
 
 
-    def train(dataset, n_epochs=10):
+    def train(dataset, n_epochs=12):
         N_BATCHES = len(dataset)
 
         sg = Generator.StyleGenerator(N_BATCHES)
-        mn = MappingNetwork()
 
         for epoch_number in range(n_epochs):
             sg.step_training_progression(epoch_number)
-            print(sg)
+            sg.cuda()
+
             for batch_number, (data, label) in enumerate(dataset):
 
-                current_batch_size = 2
+                current_batch_size = 4
 
-                z = torch.randn(current_batch_size, 512, 1, 1)
+                z = torch.randn(current_batch_size, 512, 1, 1).cuda()
 
-                w = mn(z)
-
-                tm = TensorMap(None, w)
-                out = sg(current_batch_size, tm)
+                out = sg(current_batch_size, z)
 
                 out = out.mean()
                 out.backward()
@@ -406,14 +416,14 @@ class Generator:
                 print("BATCH {:4d} DONE".format(batch_number))
                 print(10 * "-")
             
-            graph = make_dot(out)
+            #graph = make_dot(out)
 
-            graph.render(r"C:\Users\tyler.kvochick\Desktop\sg{}".format(epoch_number))
+            #graph.render(r"C:\Users\tyler.kvochick\Desktop\sg{}".format(epoch_number))
 
             print(10 * "-")
             print("EPOCH {:4d} DONE".format(epoch_number))
             print(10 * "-")
-
+    
 
 class Discriminator:
     """
@@ -483,7 +493,4 @@ if __name__ == "__main__":
     fake_dataset = [(None, None) for _ in range(10)]
 
     Generator.train(fake_dataset)
-
-import torch
-import torch.nn
 

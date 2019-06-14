@@ -36,6 +36,10 @@ class TensorMap:
         return "x: {} w: {}".format(self.x.shape, self.w.shape)
 
 
+class Settings:
+    BatchSizeProgression = [128, 128, 128, 64, 32, 16, 8, 4] # For 12GB GPU
+
+
 class Generator:
     """
     See https://arxiv.org/pdf/1812.04948.pdf section 2 for definition
@@ -279,7 +283,7 @@ class Generator:
         def init_alpha(self):
             self.alpha_step = (1 / self.n_batches)
             
-            self.alpha_progression = list(torch.arange(self.alpha_step, 1 + self.alpha_step, self.alpha_step, dtype=torch.float32).flip(0))
+            self.alpha_progression = list(torch.arange(0, 1 + self.alpha_step, self.alpha_step, dtype=torch.float32).flip(0))
             
             self.alpha = 0
         
@@ -298,7 +302,6 @@ class Generator:
                 pre_output_channels = self.move_fade_layer()
 
                 if pre_output_channels != 0:
-                    input("waiting")
                     self.output = Generator.OutputBlock(pre_output_channels)
 
                 self.alpha = 1
@@ -372,12 +375,9 @@ class Generator:
             tensor_map = self.input(current_batch_size, tensor_map)
             tensor_map = self.main(tensor_map)
 
-            print("tensor_map: ", tensor_map.x.shape)
-
             tm_out = self.output(tensor_map)
-            print("tm_out: ", tm_out.x.shape)
+
             tm_fade = self.fade_in(tensor_map)
-            print("tm_fade: ", tm_fade.x.shape)
 
             if len(list(self.fade_in.main.children())) == 0:
                 # either training just the input, or we have added all SynthesisBlocks
@@ -396,19 +396,20 @@ class Generator:
             sg.cuda()
 
             for batch_number, (data, label) in enumerate(dataset):
-
-                current_batch_size = 2
+                current_batch_size = 4
 
                 z = torch.randn(current_batch_size, 512, 1, 1).cuda()
 
                 out = sg(current_batch_size, z)
+
+                print("Alpha: {}".format(sg.alpha))
 
                 out = out.mean()
                 out.backward()
 
                 sg.zero_grad()
 
-                print(sg)
+                #print(sg)
                 print(10 * "-")
                 print("BATCH {:4d} DONE".format(batch_number))
                 print(10 * "-")
@@ -424,7 +425,7 @@ class Generator:
     def get_max_batch_size(cuda=True):
         sg = Generator.StyleGenerator(1)
 
-        sg.add_layers(8)
+        sg.add_layers(1)
 
         batch_size = 1
 
@@ -446,6 +447,7 @@ class Generator:
             except Exception as e:
                 print(e)
                 break
+
 
 class Discriminator:
     """

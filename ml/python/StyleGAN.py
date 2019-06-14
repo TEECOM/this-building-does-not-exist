@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as nnf
+from torchviz import make_dot
+import matplotlib.pyplot as plt
 
 
 class MappingNetwork(nn.Module):
@@ -90,6 +92,7 @@ class Generator:
             
             return (y_s * x) + y_b
 
+
     class PixelNorm(nn.Module):
         """
         See https://arxiv.org/pdf/1710.10196.pdf section 4.2 for definition
@@ -161,11 +164,8 @@ class Generator:
             x = x + self.b1()
             y = self.a1(w)
             x = self.adain1(x, y)
-
-            tensor_map.x = x
-            tensor_map.w = w
             
-            return tensor_map
+            return TensorMap(x, w)
 
 
     class InputBlock(nn.Module):
@@ -194,11 +194,8 @@ class Generator:
             x = x + self.b1()
             y = self.a1(w)
             x = self.adain1(x, y)
-
-            tensor_map.x = x
-            tensor_map.w = w
             
-            return tensor_map
+            return TensorMap(x, w)
 
 
     class OutputBlock(nn.Module):
@@ -212,11 +209,8 @@ class Generator:
             w = tensor_map.w
             
             x = self.to_rgb(x)
-
-            tensor_map.x = x
-            tensor_map.w = w
             
-            return tensor_map
+            return TensorMap(x, w)
 
 
     class FadeIn(nn.Module):
@@ -234,6 +228,10 @@ class Generator:
             self.main.add_module("fade_in", layer)
             self.main.add_module("output", Generator.OutputBlock(layer.conv1.out_channels))
         
+        def clear(self):
+            del(self.main.fade_in)
+            del(self.main.output)
+        
         def forward(self, tensor_map):
             return self.main(tensor_map)
 
@@ -247,13 +245,14 @@ class Generator:
             
             self.n_batches = n_batches
             
-            self.init_alpha(n_batches)
+            self.init_alpha()
             
             self.input = input_layer
 
+            self.main = nn.Sequential()
+
             self.fade_in = Generator.FadeIn()
 
-            self.main = nn.Sequential()
 
             if layer_params == None:
                 layer_params = [
@@ -273,8 +272,8 @@ class Generator:
 
             self.output = Generator.OutputBlock(input_layer.conv0.out_channels)
         
-        def init_alpha(self, n_batches):
-            self.alpha_step = (1 / n_batches)
+        def init_alpha(self):
+            self.alpha_step = (1 / self.n_batches)
             
             self.alpha_progression = list(torch.arange(self.alpha_step, 1 + self.alpha_step, self.alpha_step, dtype=torch.float32).flip(0))
             
@@ -287,12 +286,15 @@ class Generator:
 
 
         def step_training_progression(self, epoch_number):
+            """
+            This is meant to be called once per epoch to add the next layer in the progression.
+            """
             if len(self.layer_params) == 0:
                 print("All blocks are added")
                 self.alpha = 1
                 return
             
-            self.init_alpha(self.n_batches)
+            self.init_alpha()
 
             if epoch_number == 0:
                 print("Training input block")
@@ -301,10 +303,17 @@ class Generator:
             current_layer_count = len(list(self.main.children()))
             
             new_layer_params = self.layer_params.pop(0)
+            new_layer = Generator.SynthesisBlock(*new_layer_params)
+
+            if len(list(self.fade_in.main.children())) != 0:
+                self.main.add_module("sb{}".format(current_layer_count), self.fade_in.main.fade_in)
+                self.fade_in.clear()
+
+            self.fade_in.add_fade_layer(new_layer)
             
             final_out_channels = new_layer_params[1]
             
-            self.main.add_module("sb{}".format(current_layer_count), Generator.SynthesisBlock(*new_layer_params))
+            self.main.add_module("sb{}".format(current_layer_count), new_layer)
             print("Added block with params:{}\n".format(new_layer_params))
             
             self.output = Generator.OutputBlock(final_out_channels)
@@ -324,24 +333,63 @@ class Generator:
             for n in range(count):
                 new_layer_params = self.layer_params.pop(0)
                 layer = Generator.SynthesisBlock(*new_layer_params)
-                self.main.add_module("sb{}".format(current_layer_count), layer)
+                self.main.add_module("sb{}".format(n), layer)
                 print("Added block with params:{}\n".format(new_layer_params))
             
             self.output = Generator.OutputBlock(layer.conv1.out_channels)
 
 
-        def forward(self, batch_size, tensor_map):
+        def forward(self, current_batch_size, tensor_map):
+            """
+            current_batch_size controls how many fake examples to create
+            """
             self.step_alpha()
 
-            tensor_map = self.input(batch_size, tensor_map)
+            tensor_map = self.input(current_batch_size, tensor_map)
             tensor_map = self.main(tensor_map)
 
+            #print("tensor_map: ", tensor_map.x.shape)
+
             tm_out = self.output(tensor_map)
+            #print("tm_out: ", tm_out.x.shape)
             tm_fade = self.fade_in(tensor_map)
+            #print("tm_fade: ", tm_fade.x.shape)
 
-            return (tm_out.x * (1 - self.alpha)) + (self.alpha * tm_fade.x)
+            if len(list(self.fade_in.main.children())) == 0:
+                return tm_out.x
+            else:
+                return (tm_out.x * (1 - self.alpha)) + (self.alpha * tm_fade.x)
 
-#region Discriminator Definitions
+
+    def train(dataset, n_epochs=8):
+        N_BATCHES = len(dataset)
+
+        sg = Generator.StyleGenerator(N_BATCHES)
+        mn = MappingNetwork()
+
+        for epoch_number in range(n_epochs):
+            sg.step_training_progression(epoch_number)
+            print(sg)
+            for batch_number, (data, label) in enumerate(dataset):
+
+                current_batch_size = 2
+
+                z = torch.randn(current_batch_size, 512, 1, 1)
+
+                w = mn(z)
+
+                tm = TensorMap(None, w)
+                out = sg(current_batch_size, tm)
+
+                print(sg)
+                print(10 * "-")
+                print("BATCH {:4d} DONE".format(batch_number))
+                print(10 * "-")
+
+            print(10 * "-")
+            print("EPOCH {:4d} DONE".format(epoch_number))
+            print(10 * "-")
+
 
 class Discriminator:
     """
@@ -405,40 +453,9 @@ class Discriminator:
             x = self.main(x)
             return x
 
-#endregion
 
-#region Testing
 if __name__ == "__main__":
 
-    N_BATCHES = 15
+    fake_dataset = [(None, None) for _ in range(10)]
 
-    batch_size = 4
-
-    z = torch.randn(batch_size, 512, 1, 1, requires_grad=True)
-
-    mn = MappingNetwork()
-
-    w = mn(z)
-
-    tm = TensorMap(None, w)
-
-    sg = Generator.StyleGenerator(N_BATCHES)
-
-    print(sg)
-
-    #sg.step_training_progression()
-
-    for i in range(1, 9):
-        sg.step_training_progression(i)
-        for i in range(N_BATCHES):
-            out = sg(batch_size, tm)
-
-            print("alpha: ", sg.alpha)
-
-            print("out shape: ", out.shape)
-
-
-
-    input("waiting")
-
-#endregion
+    Generator.train(fake_dataset)

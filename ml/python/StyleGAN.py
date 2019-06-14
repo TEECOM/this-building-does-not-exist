@@ -271,6 +271,8 @@ class Generator:
             self.main_layer_count = len(self.layer_params)
 
             self.output = Generator.OutputBlock(input_layer.conv0.out_channels)
+
+            self.upsample = None
         
         def init_alpha(self):
             self.alpha_step = (1 / self.n_batches)
@@ -291,6 +293,8 @@ class Generator:
             """
             if len(self.layer_params) == 0:
                 print("All blocks are added")
+                pre_output_channels = self.move_fade_layer()
+                self.output = Generator.OutputBlock(pre_output_channels)
                 self.alpha = 1
                 return
             
@@ -299,24 +303,34 @@ class Generator:
             if epoch_number == 0:
                 print("Training input block")
                 return
-
-            current_layer_count = len(list(self.main.children()))
             
+            pre_output_channels = self.move_fade_layer()
+
             new_layer_params = self.layer_params.pop(0)
             new_layer = Generator.SynthesisBlock(*new_layer_params)
 
-            if len(list(self.fade_in.main.children())) != 0:
-                self.main.add_module("sb{}".format(current_layer_count), self.fade_in.main.fade_in)
+            self.fade_in.add_fade_layer(new_layer)
+
+            self.upsample = new_layer.upsample
+
+            if pre_output_channels == 0:
+                pre_output_channels = self.input.conv0.out_channels
+            self.output = Generator.OutputBlock(pre_output_channels)
+
+
+        def move_fade_layer(self):
+            if len(list(self.fade_in.main.children())) == 0:
+                return 0
+            else:
+                layer_to_move = self.fade_in.main.fade_in
+                current_main_layer_count = len(list(self.main.children()))
+                self.main.add_module("sb{}".format(current_main_layer_count), layer_to_move)
+
+                pre_output_channels = layer_to_move.conv1.out_channels
+
                 self.fade_in.clear()
 
-            self.fade_in.add_fade_layer(new_layer)
-            
-            final_out_channels = new_layer_params[1]
-            
-            self.main.add_module("sb{}".format(current_layer_count), new_layer)
-            print("Added block with params:{}\n".format(new_layer_params))
-            
-            self.output = Generator.OutputBlock(final_out_channels)
+                return pre_output_channels
 
 
         def add_layers(self, num_layers):
@@ -348,20 +362,21 @@ class Generator:
             tensor_map = self.input(current_batch_size, tensor_map)
             tensor_map = self.main(tensor_map)
 
-            #print("tensor_map: ", tensor_map.x.shape)
+            print("tensor_map: ", tensor_map.x.shape)
 
             tm_out = self.output(tensor_map)
-            #print("tm_out: ", tm_out.x.shape)
+            print("tm_out: ", tm_out.x.shape)
             tm_fade = self.fade_in(tensor_map)
-            #print("tm_fade: ", tm_fade.x.shape)
+            print("tm_fade: ", tm_fade.x.shape)
 
             if len(list(self.fade_in.main.children())) == 0:
+                # either training just the input, or we have added all SynthesisBlocks
                 return tm_out.x
             else:
-                return (tm_out.x * (1 - self.alpha)) + (self.alpha * tm_fade.x)
+                return (self.upsample(tm_out.x) * (1 - self.alpha)) + (self.alpha * tm_fade.x)
 
 
-    def train(dataset, n_epochs=8):
+    def train(dataset, n_epochs=10):
         N_BATCHES = len(dataset)
 
         sg = Generator.StyleGenerator(N_BATCHES)
@@ -381,10 +396,19 @@ class Generator:
                 tm = TensorMap(None, w)
                 out = sg(current_batch_size, tm)
 
+                out = out.mean()
+                out.backward()
+
+                sg.zero_grad()
+
                 print(sg)
                 print(10 * "-")
                 print("BATCH {:4d} DONE".format(batch_number))
                 print(10 * "-")
+            
+            graph = make_dot(out)
+
+            graph.render(r"C:\Users\tyler.kvochick\Desktop\sg{}".format(epoch_number))
 
             print(10 * "-")
             print("EPOCH {:4d} DONE".format(epoch_number))
@@ -459,3 +483,7 @@ if __name__ == "__main__":
     fake_dataset = [(None, None) for _ in range(10)]
 
     Generator.train(fake_dataset)
+
+import torch
+import torch.nn
+

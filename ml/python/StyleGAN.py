@@ -207,12 +207,14 @@ class Generator:
             super(Generator.OutputBlock, self).__init__()
             
             self.to_rgb = nn.Conv2d(input_channels, 3, (1, 1))
+            self.act = nn.LeakyReLU(0.2)
         
         def forward(self, tensor_map):
             x = tensor_map.x
             w = tensor_map.w
             
             x = self.to_rgb(x)
+            x = self.act(x)
             
             return TensorMap(x, w)
 
@@ -456,7 +458,7 @@ class Discriminator:
     class ConvBlock(nn.Sequential):
         
         def __init__(self, in_channels, out_channels):
-            super(DiscriminatorBlock, self).__init__()
+            super(Discriminator.ConvBlock, self).__init__()
         
             layers = [
                 ("conv0",      nn.Conv2d(in_channels, out_channels, (3, 3), 1, 1)),
@@ -467,12 +469,31 @@ class Discriminator:
             ]
             
             [self.add_module(n, l) for n, l in layers]
+    
+
+    class InputBlock(nn.Module):
+        def __init__(self, out_channels):
+            super(Discriminator.InputBlock, self).__init__()
+
+            self.from_rgb = nn.Conv2d(3, out_channels, (1, 1))
+            self.act = nn.LeakyReLU(0.2)
+        
+        def forward(self, x):
+            x = self.from_rgb(x)
+            x = self.act(x)
+
+            return x
+    
+
+    class OutputBlock(nn.Module):
+        def __init__(self):
+            super(Discriminator.OutputBlock, self).__init__()
 
 
     class StyleDiscriminator(nn.Module):
         
         def __init__(self, layer_params=None):
-            super(StyleDiscriminator, self).__init__()
+            super(Discriminator.StyleDiscriminator, self).__init__()
 
             self.input = None
 
@@ -490,14 +511,20 @@ class Discriminator:
                 ]
             
             self.layer_params = layer_params
+
+            self.conv_blocks = [("cb{}".format(n), Discriminator.ConvBlock(*params)) for n, params in enumerate(layer_params)]
         
         def step_training_progression(self, epoch_number):
             if len(self.layer_params) == 0:
                 print("All blocks added")
-            
-            
-            # self.output = OutputBlock(final_out_channels)
         
+        def add_layers(self, num_layers):
+            if num_layers > len(self.conv_blocks):
+                num_layers = len(self.conv_blocks)
+            for n in range(num_layers):
+                name, layer = self.conv_blocks.pop(0)
+                self.main.add_module(name, layer)
+            
         def forward(self, x):
             x = self.main(x)
             return x
@@ -505,7 +532,16 @@ class Discriminator:
 
 if __name__ == "__main__":
 
-    fake_dataset = [(None, None) for _ in range(10)]
+    sd = Discriminator.StyleDiscriminator()
 
-    Generator.train(fake_dataset)
+    print(sd)
+    print(sd.conv_blocks)
+
+    sd.add_layers(7)
+
+    x = torch.randn(1, 3, 1024, 1024)
+
+    out = sd(x)
+
+    print(out.shape)
 

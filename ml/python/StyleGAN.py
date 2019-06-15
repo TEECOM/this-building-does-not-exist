@@ -4,6 +4,8 @@ import torch.nn.functional as nnf
 #from torchviz import make_dot
 import matplotlib.pyplot as plt
 
+from torchvision.models import AlexNet
+
 
 class MappingNetwork(nn.Module):
     """
@@ -459,6 +461,9 @@ class Discriminator:
         
         def __init__(self, in_channels, out_channels):
             super(Discriminator.ConvBlock, self).__init__()
+
+            self.in_channels = in_channels
+            self.out_channels = out_channels
         
             layers = [
                 ("conv0",      nn.Conv2d(in_channels, out_channels, (3, 3), 1, 1)),
@@ -471,27 +476,28 @@ class Discriminator:
             [self.add_module(n, l) for n, l in layers]
     
 
-    class InputBlock(nn.Module):
-        def __init__(self, out_channels):
-            super(Discriminator.InputBlock, self).__init__()
-
-            self.from_rgb = nn.Conv2d(3, out_channels, (1, 1))
-            self.act = nn.LeakyReLU(0.2)
-        
-        def forward(self, x):
-            x = self.from_rgb(x)
-            x = self.act(x)
-
-            return x
-    
-
     class OutputBlock(nn.Module):
         def __init__(self, num_features=512):
             super(Discriminator.OutputBlock, self).__init__()
 
+            self.in_channels = num_features
+
             self.conv0 = nn.Conv2d(num_features, num_features, (3, 3), 1, 1)
             self.act0 = nn.LeakyReLU(0.2)
             self.conv1 = nn.Conv2d(num_features, num_features, (4, 4))
+            self.act1 = nn.LeakyReLU(0.2)
+            self.fc = nn.Linear(num_features, 2)
+        
+        def forward(self, x):
+
+            x = self.conv0(x)
+            x = self.act0(x)
+            x = self.conv1(x)
+            x = self.act1(x)
+            n, c, h, w = x.shape
+            x = self.fc(x.view(n, c * h * w))
+
+            return x
 
 
     class StyleDiscriminator(nn.Module):
@@ -499,12 +505,15 @@ class Discriminator:
         def __init__(self, layer_params=None):
             super(Discriminator.StyleDiscriminator, self).__init__()
 
+            self.from_rgb = None
+
             self.input = None
 
             self.main = nn.Sequential()
             
             if layer_params == None:
                 layer_params = [
+                    ( 16,  32),
                     ( 32,  64),
                     ( 64, 128),
                     (128, 256),
@@ -513,16 +522,37 @@ class Discriminator:
                     (512, 512),
                     (512, 512),
                 ]
-            
+
             self.layer_params = layer_params
 
             self.conv_blocks = [
                 ("cb{}".format(n), Discriminator.ConvBlock(*params)) for n, params in enumerate(layer_params)
                 ]
+            
+            self.output = Discriminator.OutputBlock()
+
+            self.set_from_rgb_layer()
+        
+        @property
+        def main_layer_count(self):
+            return len(list(self.main.children()))
+        
+        @property
+        def post_rgb_channels(self):
+            main_children = list(self.main.children())
+            main_length = len(main_children)
+            empty_main = main_length == 0
+
+            if empty_main:
+                return self.output.in_channels
+            else:
+                return main_children[0].in_channels
+            
         
         def step_training_progression(self, epoch_number):
             if len(self.layer_params) == 0:
                 print("All blocks added")
+            
         
         def add_layers(self, num_layers):
             if num_layers > len(self.conv_blocks):
@@ -530,27 +560,33 @@ class Discriminator:
             for n in range(num_layers):
                 name, layer = self.conv_blocks.pop(0)
                 self.main.add_module(name, layer)
+            self.set_from_rgb_layer()
         
-        def set_input_layer(self):
-
+        def set_from_rgb_layer(self):
+            correct_rgb_out = None
+            if self.from_rgb is not None:
+                correct_rgb_out = self.from_rgb.out_channels == self.post_rgb_channels
+            
+            if not correct_rgb_out:
+                # a smarter way would be to just concat enough channels to the already learned tensor...
+                self.from_rgb = nn.Conv2d(3, self.post_rgb_channels, (1, 1))
             
         def forward(self, x):
-            x = self.main(x)
+            x = self.from_rgb(x)
+            if self.main_layer_count > 0:
+                x = self.main(x)
+            x = self.output(x)
             return x
+
 
 
 if __name__ == "__main__":
 
     sd = Discriminator.StyleDiscriminator()
-
-
+    sd.add_layers(8)
     print(sd)
-    print(sd.conv_blocks)
-
-    sd.add_layers(7)
 
     x = torch.randn(1, 3, 1024, 1024)
 
     out = sd(x)
-
     print(out.shape)

@@ -14,6 +14,6 @@ A site in the style of [This Person Does Not Exist](https://thispersondoesnotexi
 
 ## Discriminator
 
-[] input
-[] output
+[x] input
+[x] output
 [] training progression

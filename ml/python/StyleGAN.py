@@ -486,8 +486,12 @@ class Discriminator:
     
 
     class OutputBlock(nn.Module):
-        def __init__(self):
+        def __init__(self, num_features=512):
             super(Discriminator.OutputBlock, self).__init__()
+
+            self.conv0 = nn.Conv2d(num_features, num_features, (3, 3), 1, 1)
+            self.act0 = nn.LeakyReLU(0.2)
+            self.conv1 = nn.Conv2d(num_features, num_features, (4, 4))
 
 
     class StyleDiscriminator(nn.Module):
@@ -512,7 +516,9 @@ class Discriminator:
             
             self.layer_params = layer_params
 
-            self.conv_blocks = [("cb{}".format(n), Discriminator.ConvBlock(*params)) for n, params in enumerate(layer_params)]
+            self.conv_blocks = [
+                ("cb{}".format(n), Discriminator.ConvBlock(*params)) for n, params in enumerate(layer_params)
+                ]
         
         def step_training_progression(self, epoch_number):
             if len(self.layer_params) == 0:
@@ -524,6 +530,9 @@ class Discriminator:
             for n in range(num_layers):
                 name, layer = self.conv_blocks.pop(0)
                 self.main.add_module(name, layer)
+        
+        def set_input_layer(self):
+
             
         def forward(self, x):
             x = self.main(x)
@@ -533,6 +542,7 @@ class Discriminator:
 if __name__ == "__main__":
 
     sd = Discriminator.StyleDiscriminator()
+
 
     print(sd)
     print(sd.conv_blocks)
@@ -544,4 +554,3 @@ if __name__ == "__main__":
     out = sd(x)
 
     print(out.shape)
-

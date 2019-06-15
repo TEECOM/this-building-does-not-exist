@@ -5,3 +5,15 @@ A site in the style of [This Person Does Not Exist](https://thispersondoesnotexi
 #
 
 [NVlabs StyleGAN Repository](https://github.com/NVlabs/stylegan)
+
+# TODO:
+
+## Generator
+
+[] Check alpha
+
+## Discriminator
+
+[] input
+[] output
+[] training progression

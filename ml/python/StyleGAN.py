@@ -568,7 +568,7 @@ class Discriminator:
                 correct_rgb_out = self.from_rgb.out_channels == self.post_rgb_channels
             
             if not correct_rgb_out:
-                # a smarter way would be to just concat enough channels to the already learned tensor...
+                # a smarter way would be to just concat enough channels to the already learned tensor?
                 self.from_rgb = nn.Conv2d(3, self.post_rgb_channels, (1, 1))
             
         def forward(self, x):
@@ -586,7 +586,14 @@ if __name__ == "__main__":
     sd.add_layers(8)
     print(sd)
 
-    x = torch.randn(1, 3, 1024, 1024)
+    sg = Generator.StyleGenerator(1)
+    sg.add_layers(8)
+    print(sg)
 
-    out = sd(x)
+
+    z = torch.randn(1, 512, 1, 1)
+
+    out = sg.forward(1, z)
+    print(out.shape)
+    out = sd(out)
     print(out.shape)

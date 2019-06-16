@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as nnf
-#from torchviz import make_dot
+from torchviz import make_dot
 import matplotlib.pyplot as plt
 from collections import OrderedDict as odict
 
@@ -661,6 +661,7 @@ class Discriminator:
             
             name_layer_pairs.update(self.main._modules)
 
+            del(self.main)
             self.main = nn.Sequential(odict(name_layer_pairs))
             self.set_from_rgb_layer()
             
@@ -691,29 +692,40 @@ class Discriminator:
         N_BATCHES = len(dataset)
 
         sd = Discriminator.StyleDiscriminator(N_BATCHES)
+        sg = Generator.StyleGenerator(N_BATCHES)
 
         for epoch_number in range(n_epochs):
             sd.step_training_progression(epoch_number)
+            sg.step_training_progression(epoch_number)
             print(sd)
             sd.cuda()
-
+            print(sg)
+            sg.cuda()
             for batch_number, (data, label) in enumerate(dataset):
 
-                im_dim = 2 ** (2 + epoch_number)
+                z = torch.randn(1, 512, 1, 1, requires_grad=True).cuda()
 
-                im = torch.randn(1, 3, im_dim, im_dim, requires_grad=True).cuda()
+                out = sg.forward(1, z)
+                print("OUT SHAPE {}".format(out.shape))
+                out = sd(out)
 
-                out = sd(im)
+                out = out.mean()
 
-                out.mean().backward()
+                sg.zero_grad()
                 sd.zero_grad()
+
+                if epoch_number == 8 and batch_number == 0:
+                    graph = make_dot(out)
+                    graph.render(r"C:\Users\tyler.kvochick\Desktop\sg")
+
 
  
                 print(10 * "-")
                 print("BATCH {:4d} DONE".format(batch_number))
                 print(10 * "-")
             
-
+            # graph = make_dot(out)
+            # graph.render(r"C:\Users\tyler.kvochick\Desktop\sg{}".format(epoch_number))
             print(10 * "-")
             print("EPOCH {:4d} DONE".format(epoch_number))
             print(10 * "-")
@@ -722,5 +734,6 @@ if __name__ == "__main__":
 
     fake_dataset = [(None, None) for _ in range(10)]
 
-    Discriminator.train(fake_dataset, n_epochs=10)
+    Discriminator.train(fake_dataset, n_epochs=9)
+
 

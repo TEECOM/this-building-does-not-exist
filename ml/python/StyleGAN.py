@@ -713,13 +713,7 @@ class Discriminator:
 
                 sg.zero_grad()
                 sd.zero_grad()
-
-                if epoch_number == 8 and batch_number == 0:
-                    graph = make_dot(out)
-                    graph.render(r"C:\Users\tyler.kvochick\Desktop\sg")
-
-
- 
+                
                 print(10 * "-")
                 print("BATCH {:4d} DONE".format(batch_number))
                 print(10 * "-")

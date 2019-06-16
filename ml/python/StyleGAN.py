@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as nnf
-from torchviz import make_dot
+#from torchviz import make_dot
 import matplotlib.pyplot as plt
 from collections import OrderedDict as odict
 

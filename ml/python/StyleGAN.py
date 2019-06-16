@@ -3,8 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as nnf
 #from torchviz import make_dot
 import matplotlib.pyplot as plt
-
-from torchvision.models import AlexNet
+from collections import OrderedDict as odict
 
 
 class MappingNetwork(nn.Module):
@@ -234,7 +233,10 @@ class Generator:
 
         def add_fade_layer(self, layer):
             self.main.add_module("fade_in", layer)
-            self.main.add_module("output", Generator.OutputBlock(layer.conv1.out_channels))
+            self.main.add_module(
+                "output",
+                Generator.OutputBlock(layer.conv1.out_channels)
+                )
         
         def clear(self):
             del(self.main.fade_in)
@@ -387,7 +389,8 @@ class Generator:
                 # either training just the input, or we have added all SynthesisBlocks
                 return tm_out.x
             else:
-                return (self.upsample(tm_out.x) * (1.0 - self.alpha)) + (self.alpha * tm_fade.x)
+                return (self.upsample(tm_out.x) * (1.0 - self.alpha))\
+                    + (self.alpha * tm_fade.x)
 
 
     def train(dataset, n_epochs=11):
@@ -500,16 +503,60 @@ class Discriminator:
             return x
 
 
+    class FromRGB(nn.Conv2d):
+        def __init__(self, out_channels):
+            super(Discriminator.FromRGB, self).__init__(3, out_channels, (1, 1))
+
+
+    class FadeIn(nn.Module):
+        def __init__(self):
+            super(Discriminator.FadeIn, self).__init__()
+
+            self.from_rgb = None
+            self.main = nn.Sequential()
+            self.current_layer_name = ""
+        
+        @property
+        def has_fade_layer(self):
+            main_layer_count = len(list(self.main.children()))
+            return main_layer_count > 0
+        
+        def add_fade_layer(self, name, layer):
+            if self.has_fade_layer:
+                self.clear()
+            self.from_rgb = Discriminator.FromRGB(layer.in_channels)
+            self.current_layer_name = name
+            self.main.add_module("fade_in", layer)
+        
+        def clear(self):
+            del(self.main.fade_in)
+            del(self.from_rgb)
+            self.current_layer_name = ""
+        
+        def forward(self, x):
+            x = self.from_rgb(x)
+            x = self.main.fade_in(x)
+            return x
+
+
     class StyleDiscriminator(nn.Module):
         
-        def __init__(self, layer_params=None):
+        def __init__(self, n_batches, layer_params=None):
             super(Discriminator.StyleDiscriminator, self).__init__()
+            
+            self.n_batches = n_batches
+
+            self.init_alpha()
 
             self.from_rgb = None
 
             self.input = None
 
             self.main = nn.Sequential()
+
+            self.main.add_module("output", Discriminator.OutputBlock())
+
+            self.fade_in = Discriminator.FadeIn()
             
             if layer_params == None:
                 layer_params = [
@@ -526,74 +573,154 @@ class Discriminator:
             self.layer_params = layer_params
 
             self.conv_blocks = [
-                ("cb{}".format(n), Discriminator.ConvBlock(*params)) for n, params in enumerate(layer_params)
+                ("cb{}".format(n), Discriminator.ConvBlock(*params))
+                    for n, params in enumerate(layer_params)
                 ]
-            
-            self.output = Discriminator.OutputBlock()
+
+            self.downsample = None
 
             self.set_from_rgb_layer()
         
+
         @property
         def main_layer_count(self):
             return len(list(self.main.children()))
         
+
         @property
         def post_rgb_channels(self):
             main_children = list(self.main.children())
-            main_length = len(main_children)
-            empty_main = main_length == 0
+            return main_children[0].in_channels
+        
 
-            if empty_main:
-                return self.output.in_channels
-            else:
-                return main_children[0].in_channels
+        def set_from_rgb_layer(self):
+            correct_rgb_out = None
+            if self.from_rgb is not None:
+                correct_rgb_out =\
+                    self.from_rgb.out_channels == self.post_rgb_channels
+            
+            if not correct_rgb_out:
+                # a smarter way would be to just concat enough channels
+                # to the already learned tensor?
+                self.from_rgb = Discriminator.FromRGB(self.post_rgb_channels)
+
+
+        def init_alpha(self):
+            self.alpha_step = (1 / self.n_batches)
+            
+            self.alpha_progression = list(
+                torch.arange(
+                    0,
+                    1 + self.alpha_step,
+                    self.alpha_step,
+                    dtype=torch.float32).flip(0)
+                    )
+            
+            self.alpha = 0
+        
+
+        def step_alpha(self):
+            if len(self.alpha_progression) == 0:
+                return
+            self.alpha = self.alpha_progression.pop(0)
             
         
         def step_training_progression(self, epoch_number):
-            if len(self.layer_params) == 0:
+            if len(self.conv_blocks) == 0:
                 print("All blocks added")
+                self.move_fade_layer()
+                self.fade_in.clear()
+                self.alpha = 1.0
+                return
             
+            if epoch_number == 0:
+                print("Training output layer.")
+                return
+            
+            name, new_layer = self.conv_blocks.pop()
+
+            self.downsample = new_layer.downsample
+
+            self.move_fade_layer()
+
+            self.fade_in.add_fade_layer(name, new_layer)
+
+            self.init_alpha()
+        
+
+        def move_fade_layer(self):
+
+            if not self.fade_in.has_fade_layer:
+                return
+            
+            newly_faded_layer = self.fade_in.main.fade_in
+
+            name_layer_pairs = odict([
+                (self.fade_in.current_layer_name, newly_faded_layer)
+            ])
+            
+            name_layer_pairs.update(self.main._modules)
+
+            self.main = nn.Sequential(odict(name_layer_pairs))
+            self.set_from_rgb_layer()
+            
+
         
         def add_layers(self, num_layers):
             if num_layers > len(self.conv_blocks):
                 num_layers = len(self.conv_blocks)
             for n in range(num_layers):
-                name, layer = self.conv_blocks.pop(0)
+                name, layer = self.conv_blocks.pop()
                 self.main.add_module(name, layer)
             self.set_from_rgb_layer()
         
-        def set_from_rgb_layer(self):
-            correct_rgb_out = None
-            if self.from_rgb is not None:
-                correct_rgb_out = self.from_rgb.out_channels == self.post_rgb_channels
-            
-            if not correct_rgb_out:
-                # a smarter way would be to just concat enough channels to the already learned tensor?
-                self.from_rgb = nn.Conv2d(3, self.post_rgb_channels, (1, 1))
             
         def forward(self, x):
-            x = self.from_rgb(x)
-            if self.main_layer_count > 0:
-                x = self.main(x)
-            x = self.output(x)
-            return x
 
+            if self.fade_in.has_fade_layer:
+                self.step_alpha()
+                xf = self.fade_in(x)
+                xm = self.downsample(x)
+                xm = self.main(self.from_rgb(xm))
+                xf = self.main(xf)
+                return ((1.0 - self.alpha) * xm) + (xf * self.alpha)
 
+            return self.main(self.from_rgb(x))
+
+    def train(dataset, n_epochs=2):
+        N_BATCHES = len(dataset)
+
+        sd = Discriminator.StyleDiscriminator(N_BATCHES)
+
+        for epoch_number in range(n_epochs):
+            sd.step_training_progression(epoch_number)
+            print(sd)
+            sd.cuda()
+
+            for batch_number, (data, label) in enumerate(dataset):
+
+                im_dim = 2 ** (2 + epoch_number)
+
+                im = torch.randn(1, 3, im_dim, im_dim, requires_grad=True).cuda()
+
+                out = sd(im)
+
+                out.mean().backward()
+                sd.zero_grad()
+
+ 
+                print(10 * "-")
+                print("BATCH {:4d} DONE".format(batch_number))
+                print(10 * "-")
+            
+
+            print(10 * "-")
+            print("EPOCH {:4d} DONE".format(epoch_number))
+            print(10 * "-")
 
 if __name__ == "__main__":
 
-    sd = Discriminator.StyleDiscriminator()
-    sd.add_layers(8)
-    print(sd)
+    fake_dataset = [(None, None) for _ in range(10)]
 
-    sg = Generator.StyleGenerator(1)
-    sg.add_layers(8)
-    print(sg)
+    Discriminator.train(fake_dataset, n_epochs=10)
 
-
-    z = torch.randn(1, 512, 1, 1)
-
-    out = sg.forward(1, z)
-    print(out.shape)
-    out = sd(out)
-    print(out.shape)

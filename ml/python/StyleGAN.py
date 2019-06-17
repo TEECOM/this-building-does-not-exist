@@ -724,10 +724,47 @@ class Discriminator:
             print("EPOCH {:4d} DONE".format(epoch_number))
             print(10 * "-")
 
+
+class StyleGAN:
+    def train(dataset, n_epochs=9):
+        N_BATCHES = len(dataset)
+
+        sd = Discriminator.StyleDiscriminator(N_BATCHES)
+        sg = Generator.StyleGenerator(N_BATCHES)
+
+        for epoch_number in range(n_epochs):
+            sd.step_training_progression(epoch_number)
+            sg.step_training_progression(epoch_number)
+            sd.cuda()
+            sg.cuda()
+            for batch_number, (data, label) in enumerate(dataset):
+
+                z = torch.randn(1, 512, 1, 1, requires_grad=True).cuda()
+
+                out = sg.forward(2, z)
+                print("OUT SHAPE {}".format(out.shape))
+                out = sd(out)
+
+                out = out.mean()
+
+                out.backward()
+
+                sg.zero_grad()
+                sd.zero_grad()
+                
+                print(10 * "-")
+                print("BATCH {:4d} DONE".format(batch_number))
+                print(10 * "-")
+
+            print(10 * "-")
+            print("EPOCH {:4d} DONE".format(epoch_number))
+            print(10 * "-")
+
+
 if __name__ == "__main__":
 
     fake_dataset = [(None, None) for _ in range(10)]
 
-    Discriminator.train(fake_dataset, n_epochs=9)
+    StyleGAN.train(fake_dataset, n_epochs=10)
 
 

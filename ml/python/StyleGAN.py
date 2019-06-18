@@ -759,11 +759,11 @@ class StyleGAN:
             sd.step_training_progression(epoch_number)
             sg.step_training_progression(epoch_number)
 
-            sd_criterion = nn.BCEWithLogitsLoss().cuda()
-            sg_criterion = nn.BCEWithLogitsLoss().cuda()
+            sd_criterion = nn.BCEWithLogitsLoss(reduction="mean").cuda()
+            sg_criterion = nn.BCEWithLogitsLoss(reduction="mean").cuda()
 
-            sd_optimizer = optim.Adam(sd.parameters(), 1e-3)
-            sg_optimizer = optim.Adam(sg.parameters(), 1e-3)
+            sd_optimizer = optim.Adam(sd.parameters(), 1e-4)
+            sg_optimizer = optim.Adam(sg.parameters(), 1e-4)
 
             target_size = target_sizes.pop(0)
 
@@ -775,6 +775,8 @@ class StyleGAN:
 
             for batch_number, (data, label) in enumerate(dataloader):
 
+                tc.empty_cache()
+
                 batch_size, c, h, w = data.shape
 
                 data = nnf.interpolate(data, size=(target_size, target_size), mode="bilinear", align_corners=True)
@@ -784,6 +786,13 @@ class StyleGAN:
                 # ----------------------------
                 sd.cuda()
                 data = data.cuda()
+
+                low = torch.zeros(1).uniform_(.5, 1.0).item()
+
+                noise = data.clone().uniform_(low, 1.0)
+
+                data *= noise
+
                 data.requires_grad = True
                 label = StyleGAN.make_label(batch_size, "real").cuda()
 
@@ -792,9 +801,6 @@ class StyleGAN:
                 d_loss_real = sd_criterion(out, label)
 
                 d_loss_real.backward()
-
-                del(data)
-                tc.empty_cache()
 
                 # d_loss_real = torch.tensor(0)
 
@@ -834,21 +840,23 @@ class StyleGAN:
                 sg.zero_grad()
                 sd.zero_grad()
 
-                update_message = "Epoch: [{:4d}/{:4d}] Batch: [{:4d}/{:4d}] Losses: [Real: {:.4f} Fake: {:.4f} Generator {:.4f}"
-
-                update_message = update_message.format(
-                    epoch_number,
-                    n_epochs,
-                    batch_number,
-                    n_batches,
-                    d_loss_real.item(),
-                    d_loss_fake.item(),
-                    fake_images_loss.item()
-                    )
+                
                 
                 if batch_number % 20 == 0:
+                    update_message = "Epoch: [{:4d}/{:4d}] Batch: [{:4d}/{:4d}] Losses: [Real: {:.4f} Fake: {:.4f} Generator {:.4f}"
+
+                    update_message = update_message.format(
+                        epoch_number,
+                        n_epochs,
+                        batch_number,
+                        n_batches,
+                        d_loss_real.item(),
+                        d_loss_fake.item(),
+                        fake_images_loss.item()
+                        )
                     to_image = transforms.ToPILImage()
                     # print("Data Shape: {}".format(data.shape))
+
                     print("Fake Image Shape: {}".format(fake_images.shape))
                     print(update_message)
 
@@ -860,7 +868,7 @@ class StyleGAN:
                         )
 
                     image_grid = vutils.make_grid(data.clone().cpu(), nrow=1, normalize=True)
-                    image_grid
+                    image_grid = to_image(image_grid)
 
                     image_grid.save(r"C:\Users\tyler.kvochick\Documents\Images\StyleGAN\{}-{}-{}-real.png".format(
                         math.floor(time.time()), epoch_number, batch_number)

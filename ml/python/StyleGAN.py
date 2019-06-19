@@ -78,7 +78,7 @@ class Generator:
             self.height = height
             self.num_features = num_features
             
-            self.noise_image = torch.nn.Parameter(data=torch.randn(1, 1, height, width), requires_grad=False)
+            self.noise_image = torch.nn.Parameter(data=torch.randn(1, 1, height, width), requires_grad=True)
             
             self.scaling_factors = torch.nn.Parameter(data=torch.randn(1, num_features, 1, 1), requires_grad=True)
             
@@ -137,8 +137,8 @@ class Generator:
             self.norm = Generator.PixelNorm()
             self.act = nn.LeakyReLU(negative_slope=0.2)
         
-        def forward(self, x):
-            x = self.conv(x)
+        def forward(self, x, b):
+            x = self.conv(x) + b
             x = self.norm(x)
             x = self.act(x)
             
@@ -166,13 +166,13 @@ class Generator:
             w = tensor_map.w
             
             x = self.upsample(x)
-            x = self.conv0(x)
-            x = x + self.b0()
+            b = self.b0()
+            x = self.conv0(x, b)
             y = self.a0(w)
             x = self.adain0(x, y)
             
-            x = self.conv1(x)
-            x = x + self.b1()
+            b = self.b1()
+            x = self.conv1(x, b)
             y = self.a1(w)
             x = self.adain1(x, y)
             
@@ -197,8 +197,8 @@ class Generator:
 
             w = tensor_map.w
 
-            x = self.conv0(self.constant.expand(batch_size, -1, -1, -1))
-            x = x + self.b0()
+            b = self.b0()
+            x = self.conv0(self.constant.expand(batch_size, -1, -1, -1), b)
             y = self.a0(w)
             x = self.adain0(x, y)
 
@@ -213,7 +213,7 @@ class Generator:
         def __init__(self, input_channels):
             super(Generator.OutputBlock, self).__init__()
             
-            self.to_rgb = nn.Conv2d(input_channels, 3, (1, 1))
+            self.to_rgb = nn.Conv2d(input_channels, 1, (1, 1))
             self.act = nn.Sigmoid()
         
         def forward(self, tensor_map):
@@ -516,7 +516,7 @@ class Discriminator:
 
     class FromRGB(nn.Conv2d):
         def __init__(self, out_channels):
-            super(Discriminator.FromRGB, self).__init__(3, out_channels, (1, 1))
+            super(Discriminator.FromRGB, self).__init__(1, out_channels, (1, 1))
 
 
     class FadeIn(nn.Module):
@@ -840,11 +840,11 @@ class StyleGAN:
                     fake_images_loss = sg_criterion(out, label)
 
                     fake_images_loss.backward()
+
                     sg_optimizer.step()
 
                     sg.zero_grad()
                     sd.zero_grad()
-
 
                     if batch_number % 20 == 0:
                         update_message =\
@@ -857,7 +857,7 @@ class StyleGAN:
                             n_epochs,
                             subepoch_number + 1,
                             n_subepochs,
-                            batch_number + 1,
+                            batch_number,
                             n_batches,
                             d_loss_real.item(),
                             d_loss_fake.item(),
@@ -902,6 +902,7 @@ class StyleGAN:
 
         input_transform = transforms.Compose([
             transforms.Resize((1024, 1024)),
+            transforms.Grayscale(1),
             transforms.ToTensor()
         ])
 

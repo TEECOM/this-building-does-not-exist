@@ -10,7 +10,7 @@ import math
 import time
 from multiprocessing import Process
 from torchviz import make_dot
-
+import matplotlib.pyplot as plt
 
 class MappingNetwork(nn.Module):
     def __init__(self, latent_dim=512, n_layers=8):
@@ -526,7 +526,9 @@ if __name__ == "__main__":
 
     dataloader, n_batches = Trainer.image_dataset(data_root, batch_size=4)
 
-    Trainer.train(1000, n_batches, dataloader, 1, models_dict=None)
+    # Trainer.train(1000, n_batches, dataloader, 1, models_dict=None)
+
+    Trainer.notebook_train
 
 
 

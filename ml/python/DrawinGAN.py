@@ -421,7 +421,7 @@ class Trainer:
         return dataloader, (len(dataset.samples) // batch_size)
     
 
-    def notebook_train(generator, discriminator, dataloader, n_batches, n_epochs=5):
+    def notebook_train(generator, discriminator, dataloader, n_batches, plotting_lib, n_epochs=5):
 
         to_image = transforms.ToPILImage()
 
@@ -506,8 +506,8 @@ class Trainer:
                     image_grid = to_image(image_grid)
 
                     
-                    plt.axis('off')
-                    plt.imshow(image_grid)
+                    plotting_lib.axis('off')
+                    plotting_lib.imshow(image_grid)
 
 
 

@@ -144,7 +144,7 @@ class Generator:
                 (128, 128), #128
                 (128, 128), #256
                 (128, 128), #512
-                (128,   output_channels), #1024
+                (128, output_channels), #1024
             ]
 
             for n, params in enumerate(self.layer_params):
@@ -208,12 +208,12 @@ class Discriminator:
 
             y = self.conv(x)
 
-            x = x.mean(dim=(0, 1), keepdim=True)
-            x = nnf.interpolate(x, size=(hx // 2, wx // 2), mode="bilinear", align_corners=True)
+            # x = x.mean(dim=(0, 1), keepdim=True)
+            # x = nnf.interpolate(x, size=(hx // 2, wx // 2), mode="bilinear", align_corners=True)
 
             y = self.bn(y)
 
-            return self.act(y + x)
+            return self.act(y)
     
     class DrawingDiscriminator(nn.Module):
         def __init__(self, input_channels=3, latent_dim=2048):
@@ -294,8 +294,6 @@ class DrawingGAN:
         discriminator_criterion = nn.BCELoss(reduction="mean").cuda(cuda_idx)
         generator_criterion = nn.BCELoss(reduction="mean").cuda(cuda_idx)
 
-        p = None
-
         for epoch_number in range(n_epochs):
 
             lr = 5e-3
@@ -307,9 +305,6 @@ class DrawingGAN:
             dg_optimizer = torch.optim.Adam(dg.parameters(), lr=lr)
 
             for batch_number, (data, label) in enumerate(dataloader):
-
-                if p is not None:
-                    p.join()
 
                 batch_size, channels, height, width = data.shape
 
@@ -326,68 +321,68 @@ class DrawingGAN:
 
                 z = torch.randn(batch_size, 512, 1, 1).cuda(cuda_idx)
 
-                encoded = dd(data, mode="ae")
-                decoded = dg(z, encoded, mode="ae")
+                # encoded = dd(data, mode="ae")
+                # decoded = dg(z, encoded, mode="ae")
 
-                reconstruction_loss = ae_criterion(decoded, data.detach())
+                # reconstruction_loss = ae_criterion(decoded, data.detach())
 
-                reconstruction_loss.backward()
+                # reconstruction_loss.backward()
 
-                dd_optimizer.step()
-                dg_optimizer.step()
+                # dd_optimizer.step()
+                # dg_optimizer.step()
 
-                dd_optimizer.zero_grad()
-                dg_optimizer.zero_grad()
+                # dd_optimizer.zero_grad()
+                # dg_optimizer.zero_grad()
 
                 # Generate fake images
 
-                # fake_images = dg(z, None, mode="generator")
+                fake_images = dg(z, None, mode="generator")
 
-                # # Train on real
+                # Train on real
 
-                # real_classification = dd(data, mode="discriminator")
-                # real_loss = discriminator_criterion(real_classification, real_label)
+                real_classification = dd(data, mode="discriminator")
+                real_loss = discriminator_criterion(real_classification, real_label)
 
-                real_loss = torch.tensor(0)
+                # real_loss = torch.tensor(0)
 
-                # real_loss.backward()
+                real_loss.backward()
 
-                # # Train on fake
+                # Train on fake
 
-                # fake_classification = dd(fake_images.detach(), mode="discriminator")
-                # fake_loss = discriminator_criterion(fake_classification, fake_label)
+                fake_classification = dd(fake_images.detach(), mode="discriminator")
+                fake_loss = discriminator_criterion(fake_classification, fake_label)
 
-                fake_loss = torch.tensor(0)
+                # fake_loss = torch.tensor(0)
 
-                # fake_loss.backward()
+                fake_loss.backward()
 
-                # dd_optimizer.step()
-                # dd_optimizer.zero_grad()
+                dd_optimizer.step()
+                dd_optimizer.zero_grad()
 
-                # # Train generator on how well it fooled discriminator
+                # Train generator on how well it fooled discriminator
 
-                # gen_classification = dd(fake_images, mode="discriminator")
-                # gen_loss = discriminator_criterion(gen_classification, real_label)
+                gen_classification = dd(fake_images, mode="discriminator")
+                gen_loss = discriminator_criterion(gen_classification, real_label)
 
-                gen_loss = torch.tensor(0)
+                # gen_loss = torch.tensor(0)
 
-                # gen_loss.backward()
+                gen_loss.backward()
 
-                # dg_optimizer.step()
+                dg_optimizer.step()
 
-                # dg_optimizer.zero_grad()
+                dg_optimizer.zero_grad()
 
-                # # Progress tracking
+                # Progress tracking
 
                 # if epoch_number == 0 and batch_number == 0:
-                    # make_dot(decoded).render(r"D:\Images\TorchViz\SimpleStyleGan\decoded")
-                    # make_dot(real_loss).render(r"D:\Images\TorchViz\SimpleStyleGan\real")
-                    # make_dot(gen_loss).render(r"D:\Images\TorchViz\SimpleStyleGan\gen")
+                #     make_dot(decoded).render(r"D:\Images\TorchViz\SimpleStyleGan\decoded")
+                #     make_dot(real_loss).render(r"D:\Images\TorchViz\SimpleStyleGan\real")
+                #     make_dot(gen_loss).render(r"D:\Images\TorchViz\SimpleStyleGan\gen")
                 
                 if batch_number % 20 == 0:
                     update_message =\
                         "Epoch: [{:4d}/{:4d}] Batch: [{:4d}/{:4d}]\n"+\
-                        "Losses: [Real: {:.4f} Fake: {:.4f} Reconstruction: {:.4f} Generator {:.4f}]\n"
+                        "Losses: [Real: {:.4f} Fake: {:.4f} Generator {:.4f}]\n"
 
                     update_message = update_message.format(
                         epoch_number + 1,
@@ -396,7 +391,7 @@ class DrawingGAN:
                         n_batches,
                         real_loss.item(),
                         fake_loss.item(),
-                        reconstruction_loss.item(),
+                        # reconstruction_loss.item(),
                         gen_loss.item(),
                         )
 
@@ -405,29 +400,29 @@ class DrawingGAN:
                     n_rows = int(math.sqrt(batch_size))
 
                     tensors = [
-                        # fake_images,
-                        # data,
-                        decoded
+                        fake_images,
+                        data,
+                        # decoded
                     ]
-
                     tensors = [t.clone().detach().cpu() for t in tensors]
+
                     paths = [
-                        # r"D:\Images\SimpleStyleGAN\{}-{}-{}-fake.png".format(
-                        #     math.floor(time.time()), epoch_number, batch_number
-                        # ),
-                        # r"D:\Images\SimpleStyleGAN\{}-{}-{}-real.png".format(
-                        #     math.floor(time.time()), epoch_number, batch_number
-                        # ),
-                        r"D:\Images\SimpleStyleGAN\{}-{}-{}-decoded.png".format(
+                        r"D:\Images\SimpleStyleGAN\{}-{}-{}-fake.png".format(
                             math.floor(time.time()), epoch_number, batch_number
-                        )
+                        ),
+                        r"D:\Images\SimpleStyleGAN\{}-{}-{}-real.png".format(
+                            math.floor(time.time()), epoch_number, batch_number
+                        ),
+                        # r"D:\Images\SimpleStyleGAN\{}-{}-{}-decoded.png".format(
+                        #     math.floor(time.time()), epoch_number, batch_number
+                        # )
                     ]
 
                     DrawingGAN.save_images(tensors, paths, n_rows)
 
             # Per epoch
-            # torch.save(dd.state_dict(), r"D:\MLModels\SimpleStyleGAN\{}-discriminator.pth".format(math.floor(time.time())))
-            # torch.save(dg.state_dict(), r"D:\MLModels\SimpleStyleGAN\{}-generator.pth".format(math.floor(time.time())))
+            torch.save(dd.state_dict(), r"D:\MLModels\SimpleStyleGAN\{}-discriminator.pth".format(math.floor(time.time())))
+            torch.save(dg.state_dict(), r"D:\MLModels\SimpleStyleGAN\{}-generator.pth".format(math.floor(time.time())))
     
 
     def image_dataset(path, batch_size=3):
@@ -449,14 +444,14 @@ class DrawingGAN:
 
 if __name__ == "__main__":
 
-    data_root = r"C:\Users\tyler.kvochick\Documents\Datasets\ALotOfPlans"
+    data_root = r"D:\Datasets\ALotOfPlansModified"
 
     model_root = r"D:\MLModels\SimpleStyleGAN"
 
-    models_dict = {
-        "discriminator": torch.load(model_root + r"\_1560939083-discriminator.pth"),
-        "generator": torch.load(model_root + r"\_1560939083-generator.pth")
-    }
+    # models_dict = {
+    #     "discriminator": torch.load(model_root + r"\_1560939083-discriminator.pth"),
+    #     "generator": torch.load(model_root + r"\_1560939083-generator.pth")
+    # }
 
     dataloader, n_batches = DrawingGAN.image_dataset(data_root, batch_size=4)
 

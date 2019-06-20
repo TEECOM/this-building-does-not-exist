@@ -23,10 +23,6 @@ class MappingNetwork(nn.Module):
             layer = nn.Linear(latent_dim, latent_dim)
             self.main.add_module(name, layer)
 
-            # name = "act-{}".format(n)
-            # layer = nn.LeakyReLU(latent_dim, latent_dim)
-            # self.main.add_module(name, layer)
-    
     def forward(self, z):
         nz, lz, hz, wz = z.shape
         return nnf.leaky_relu(self.main(z.view(nz, lz)))
@@ -107,14 +103,8 @@ class Generator:
             x = self.ada_in(container.x, y)
 
             x = self.conv(container.x)
-            # y = self.style0(container.w.view(nx, self.latent_dim))
-
-            # x = self.bn(x * y.view(nx, self.conv.out_channels, 1, 1))
 
             x = self.bn(x)
-
-            # xm = container.x.mean(dim=(0, 1), keepdim=True)
-            # xm = nnf.interpolate(xm, size=(2 * hx, 2 * wx), mode="bilinear", align_corners=True)
 
             x = self.act(x)
 
@@ -173,13 +163,9 @@ class Generator:
             if mode == "generator":
                 const = self.constant.expand(nz, -1, -1, -1)
 
-                # const = nnf.leaky_relu(const * w.view(nz, -1, 1, 1))
-
                 out = self.main(Container(const, w))
                 return out.x
             if mode == "ae":
-
-                # x = nnf.leaky_relu(x * w.view(nz, -1, 1, 1))
 
                 out = self.main(Container(x, w))
                 return out.x
@@ -207,12 +193,7 @@ class Discriminator:
             nx, cx, hx, wx = x.shape
 
             y = self.conv(x)
-
-            # x = x.mean(dim=(0, 1), keepdim=True)
-            # x = nnf.interpolate(x, size=(hx // 2, wx // 2), mode="bilinear", align_corners=True)
-
             y = self.bn(y)
-
             return self.act(y)
     
     class DrawingDiscriminator(nn.Module):
@@ -266,7 +247,7 @@ class Discriminator:
                 return self.lrelu(y.reshape(nx, 512, wh//2, wh//2))
 
 
-class DrawingGAN:
+class Trainer:
     def save_images(tensor_list, path_list, nrows):
         to_image = transforms.ToPILImage()
         print("Saving images...")
@@ -296,7 +277,7 @@ class DrawingGAN:
 
         for epoch_number in range(n_epochs):
 
-            lr = 5e-3
+            lr = 9e-3
 
             if epoch_number % 10 == 0 and epoch_number != 0:
                 lr = lr / 1.1
@@ -321,18 +302,18 @@ class DrawingGAN:
 
                 z = torch.randn(batch_size, 512, 1, 1).cuda(cuda_idx)
 
-                # encoded = dd(data, mode="ae")
-                # decoded = dg(z, encoded, mode="ae")
+                encoded = dd(data, mode="ae")
+                decoded = dg(z, encoded, mode="ae")
 
-                # reconstruction_loss = ae_criterion(decoded, data.detach())
+                reconstruction_loss = ae_criterion(decoded, data.detach())
 
-                # reconstruction_loss.backward()
+                reconstruction_loss.backward()
 
-                # dd_optimizer.step()
-                # dg_optimizer.step()
+                dd_optimizer.step()
+                dg_optimizer.step()
 
-                # dd_optimizer.zero_grad()
-                # dg_optimizer.zero_grad()
+                dd_optimizer.zero_grad()
+                dg_optimizer.zero_grad()
 
                 # Generate fake images
 
@@ -402,7 +383,7 @@ class DrawingGAN:
                     tensors = [
                         fake_images,
                         # data,
-                        # decoded
+                        decoded
                     ]
                     tensors = [t.clone().detach().cpu() for t in tensors]
 
@@ -413,12 +394,12 @@ class DrawingGAN:
                         # r"D:\Images\SimpleStyleGAN\{}-{}-{}-real.png".format(
                         #     math.floor(time.time()), epoch_number, batch_number
                         # ),
-                        # r"D:\Images\SimpleStyleGAN\{}-{}-{}-decoded.png".format(
-                        #     math.floor(time.time()), epoch_number, batch_number
-                        # )
+                        r"D:\Images\SimpleStyleGAN\{}-{}-{}-decoded.png".format(
+                            math.floor(time.time()), epoch_number, batch_number
+                        )
                     ]
 
-                    DrawingGAN.save_images(tensors, paths, n_rows)
+                    Trainer.save_images(tensors, paths, n_rows)
 
             # Per epoch
             torch.save(dd.state_dict(), r"D:\MLModels\SimpleStyleGAN\{}-discriminator.pth".format(math.floor(time.time())))
@@ -438,6 +419,94 @@ class DrawingGAN:
         dataloader = DataLoader(dataset, batch_size, num_workers=8, shuffle=True)
 
         return dataloader, (len(dataset.samples) // batch_size)
+    
+
+    def notebook_train(generator, discriminator, dataloader, n_epochs=5):
+
+        to_image = transforms.ToPILImage()
+
+        for epoch_number in range(n_epochs):
+
+            discriminator_criterion = nn.BCELoss(reduction="mean").cuda()
+            generator_criterion = nn.BCELoss(reduction="mean").cuda()
+
+            lr = 9e-3
+
+            if epoch_number % 10 == 0 and epoch_number != 0:
+                lr = lr / 1.1
+
+            dd_optimizer = torch.optim.Adam(discriminator.parameters(), lr=lr)
+            dg_optimizer = torch.optim.Adam(generator.parameters(), lr=lr)
+
+            for batch_number, (data, label) in enumerate(dataloader):
+
+                batch_size, channels, height, width = data.shape
+
+                data = data.cuda()
+                data.requires_grad = True
+
+                real_label = torch.zeros(batch_size, 2).cuda()
+                real_label[:, 0] = 1.0
+
+                fake_label = torch.zeros(batch_size, 2).cuda()
+                fake_label[:, 1] = 1.0
+
+                z = torch.randn(batch_size, 512, 1, 1).cuda()
+
+                fake_images = generator(z, None, mode="generator")
+
+                # Train on real
+
+                real_classification = discriminator(data, mode="discriminator")
+                real_loss = discriminator_criterion(real_classification, real_label)
+
+                real_loss.backward()
+
+                # Train on fake
+
+                fake_classification = discriminator(fake_images.detach(), mode="discriminator")
+                fake_loss = discriminator_criterion(fake_classification, fake_label)
+
+                fake_loss.backward()
+
+                dd_optimizer.step()
+                dd_optimizer.zero_grad()
+
+                # Train generator on how well it fooled discriminator
+
+                gen_classification = discriminator(fake_images, mode="discriminator")
+                gen_loss = discriminator_criterion(gen_classification, real_label)
+
+                gen_loss.backward()
+
+                dg_optimizer.step()
+
+                dg_optimizer.zero_grad()
+
+                if batch_number % 20 == 0:
+                    update_message =\
+                        "Epoch: [{:4d}/{:4d}] Batch: [{:4d}/{:4d}]\n"+\
+                        "Losses: [Real: {:.4f} Fake: {:.4f} Generator {:.4f}]\n"
+
+                    update_message = update_message.format(
+                        epoch_number + 1,
+                        n_epochs,
+                        batch_number,
+                        n_batches,
+                        real_loss.item(),
+                        fake_loss.item(),
+                        gen_loss.item(),
+                        )
+
+                    print(update_message)
+
+                    n_rows = int(math.sqrt(batch_size))
+
+                    image = to_image(fake_images.detach().cpu())
+                    
+                    plt.axis('off')
+                    plt.imshow(image)
+
 
 
                 
@@ -453,9 +522,9 @@ if __name__ == "__main__":
     #     "generator": torch.load(model_root + r"\_1560939083-generator.pth")
     # }
 
-    dataloader, n_batches = DrawingGAN.image_dataset(data_root, batch_size=4)
+    dataloader, n_batches = Trainer.image_dataset(data_root, batch_size=4)
 
-    DrawingGAN.train(1000, n_batches, dataloader, 1, models_dict=None)
+    Trainer.train(1000, n_batches, dataloader, 1, models_dict=None)
 
 
 

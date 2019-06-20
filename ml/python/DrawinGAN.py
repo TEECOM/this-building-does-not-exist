@@ -502,10 +502,12 @@ class Trainer:
 
                     n_rows = int(math.sqrt(batch_size))
 
-                    image = to_image(fake_images.detach().cpu())
+                    image_grid = vutils.make_grid(fake_images.clone().cpu(), nrow=n_rows, normalize=True, padding=0)
+                    image_grid = to_image(image_grid)
+
                     
                     plt.axis('off')
-                    plt.imshow(image)
+                    plt.imshow(image_grid)
 
 
 

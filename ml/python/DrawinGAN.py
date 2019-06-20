@@ -505,9 +505,7 @@ class Trainer:
                     image_grid = vutils.make_grid(fake_images.clone().cpu(), nrow=n_rows, normalize=True, padding=0)
                     image_grid = to_image(image_grid)
 
-                    
-                    plotting_lib.axis('off')
-                    plotting_lib.imshow(image_grid)
+                    image_grid
 
 
 

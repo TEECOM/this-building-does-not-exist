@@ -39,11 +39,53 @@ class Container:
 
 
 class Generator:
+
+    class A(nn.Module):
+        def __init__(self, in_channels, latent_dim=512):
+            super(Generator.A, self).__init__()
+
+            self.in_channels = in_channels
+
+            self.style_s = nn.Linear(latent_dim, in_channels)
+            self.style_b = nn.Linear(latent_dim, in_channels)
+
+        def forward(self, w):
+            nw, cw = w.shape
+
+            y_s = nnf.leaky_relu(self.style_s(w)).view(nw, self.in_channels, 1, 1)
+            y_b = nnf.leaky_relu(self.style_b(w)).view(nw, self.in_channels, 1, 1)
+
+            return (y_s, y_b)
+    
+
+    class AdaIN(nn.Module):
+        def __init__(self):
+            super(Generator.AdaIN, self).__init__()
+            
+        def forward(self, x, y):
+            # y is coming from an A block
+            # x is a conv output
+            n, c, h, w = x.shape
+            mu_x    = x.mean(dim=(0, 2, 3), keepdim=True)
+            sigma_x = x.std(dim=(0, 2, 3), keepdim=True)
+            
+            normed_x = (x - mu_x) / sigma_x
+            
+            y_s, y_b = y
+            
+            return (y_s * x) + y_b
+
+
+
     class ConvBlock(nn.Module):
         def __init__(self, in_channels, out_channels, latent_dim=512):
             super(Generator.ConvBlock, self).__init__()
 
             self.latent_dim = latent_dim
+
+            self.a = Generator.A(in_channels, latent_dim=latent_dim)
+
+            self.ada_in = Generator.AdaIN()
 
             self.conv = nn.ConvTranspose2d(
                 in_channels,
@@ -56,10 +98,13 @@ class Generator:
 
             self.bn = nn.BatchNorm2d(out_channels)
             self.act = nn.LeakyReLU()
-            # self.style0 = nn.Linear(latent_dim, out_channels)
         
         def forward(self, container):
             nx, cx, hx, wx = container.x.shape
+
+            y = self.a(container.w)
+
+            x = self.ada_in(container.x, y)
 
             x = self.conv(container.x)
             # y = self.style0(container.w.view(nx, self.latent_dim))
@@ -95,11 +140,11 @@ class Generator:
                 (256, 128), #8
                 (128, 128), #16
                 (128, 128), #32
-                (128,  64), #64
-                ( 64,  32), #128
-                ( 32,  16), #256
-                ( 16,   8), #512
-                (  8,   output_channels), #1024
+                (128, 128), #64
+                (128, 128), #128
+                (128, 128), #256
+                (128, 128), #512
+                (128,   output_channels), #1024
             ]
 
             for n, params in enumerate(self.layer_params):
@@ -241,8 +286,6 @@ class DrawingGAN:
         print("DD Params: ", dd.count_params())
         print("DG Params: ", dg.count_params())
 
-        exit()
-
         if models_dict is not None:
             dd.load_state_dict(models_dict["discriminator"])
             dg.load_state_dict(models_dict["generator"])
@@ -255,8 +298,13 @@ class DrawingGAN:
 
         for epoch_number in range(n_epochs):
 
-            dd_optimizer = torch.optim.Adam(dd.parameters(), lr=1e-3)
-            dg_optimizer = torch.optim.Adam(dg.parameters(), lr=1e-3)
+            lr = 5e-3
+
+            if epoch_number % 10 == 0 and epoch_number != 0:
+                lr = lr / 1.1
+
+            dd_optimizer = torch.optim.Adam(dd.parameters(), lr=lr)
+            dg_optimizer = torch.optim.Adam(dg.parameters(), lr=lr)
 
             for batch_number, (data, label) in enumerate(dataloader):
 
@@ -378,8 +426,8 @@ class DrawingGAN:
                     DrawingGAN.save_images(tensors, paths, n_rows)
 
             # Per epoch
-            torch.save(dd.state_dict(), r"D:\MLModels\SimpleStyleGAN\{}-discriminator.pth".format(math.floor(time.time())))
-            torch.save(dg.state_dict(), r"D:\MLModels\SimpleStyleGAN\{}-generator.pth".format(math.floor(time.time())))
+            # torch.save(dd.state_dict(), r"D:\MLModels\SimpleStyleGAN\{}-discriminator.pth".format(math.floor(time.time())))
+            # torch.save(dg.state_dict(), r"D:\MLModels\SimpleStyleGAN\{}-generator.pth".format(math.floor(time.time())))
     
 
     def image_dataset(path, batch_size=3):
@@ -410,7 +458,7 @@ if __name__ == "__main__":
         "generator": torch.load(model_root + r"\_1560939083-generator.pth")
     }
 
-    dataloader, n_batches = DrawingGAN.image_dataset(data_root, batch_size=9)
+    dataloader, n_batches = DrawingGAN.image_dataset(data_root, batch_size=4)
 
     DrawingGAN.train(1000, n_batches, dataloader, 1, models_dict=None)
 

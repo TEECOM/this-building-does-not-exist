@@ -421,7 +421,7 @@ class Trainer:
         return dataloader, (len(dataset.samples) // batch_size)
     
 
-    def notebook_train(generator, discriminator, dataloader, n_epochs=5):
+    def notebook_train(generator, discriminator, dataloader, n_batches, n_epochs=5):
 
         to_image = transforms.ToPILImage()
 

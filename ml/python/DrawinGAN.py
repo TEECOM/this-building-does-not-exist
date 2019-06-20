@@ -19,7 +19,7 @@ class MappingNetwork(nn.Module):
         self.main = nn.Sequential()
 
         for n in range(n_layers):
-            name = "fc-{}".format(n)
+            name = "fc{}".format(n)
             layer = nn.Linear(latent_dim, latent_dim)
             self.main.add_module(name, layer)
 
@@ -148,7 +148,7 @@ class Generator:
             ]
 
             for n, params in enumerate(self.layer_params):
-                name = "cb-{}".format(n)
+                name = "cb{}".format(n)
                 layer = conv_block_class(*params)
 
                 last_layer = n == len(self.layer_params) - 1
@@ -237,7 +237,7 @@ class Discriminator:
             ]
 
             for n, params in enumerate(self.layer_params):
-                name = "cb-{}".format(n)
+                name = "cb{}".format(n)
                 layer = Discriminator.ConvBlock(*params)
 
                 self.main.add_module(name, layer)

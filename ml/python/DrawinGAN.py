@@ -121,7 +121,7 @@ class Generator:
             return Container(x, container.w)
     
     class DrawingGenerator(nn.Module):
-        def __init__(self, latent_dim=512, output_channels=3):
+        def __init__(self, conv_block_class, latent_dim=512, output_channels=3):
             super(Generator.DrawingGenerator, self).__init__()
 
             self.latent_dim = latent_dim
@@ -149,7 +149,7 @@ class Generator:
 
             for n, params in enumerate(self.layer_params):
                 name = "cb-{}".format(n)
-                layer = Generator.ConvBlock(*params)
+                layer = conv_block_class(*params)
 
                 last_layer = n == len(self.layer_params) - 1
 
@@ -281,7 +281,7 @@ class DrawingGAN:
         to_image = transforms.ToPILImage()
 
         dd = Discriminator.DrawingDiscriminator(input_channels=1).cuda(cuda_idx)
-        dg = Generator.DrawingGenerator(output_channels=1).cuda(cuda_idx)
+        dg = Generator.DrawingGenerator(Generator.ConvBlock, output_channels=1).cuda(cuda_idx)
 
         print("DD Params: ", dd.count_params())
         print("DG Params: ", dg.count_params())
@@ -401,7 +401,7 @@ class DrawingGAN:
 
                     tensors = [
                         fake_images,
-                        data,
+                        # data,
                         # decoded
                     ]
                     tensors = [t.clone().detach().cpu() for t in tensors]
@@ -410,9 +410,9 @@ class DrawingGAN:
                         r"D:\Images\SimpleStyleGAN\{}-{}-{}-fake.png".format(
                             math.floor(time.time()), epoch_number, batch_number
                         ),
-                        r"D:\Images\SimpleStyleGAN\{}-{}-{}-real.png".format(
-                            math.floor(time.time()), epoch_number, batch_number
-                        ),
+                        # r"D:\Images\SimpleStyleGAN\{}-{}-{}-real.png".format(
+                        #     math.floor(time.time()), epoch_number, batch_number
+                        # ),
                         # r"D:\Images\SimpleStyleGAN\{}-{}-{}-decoded.png".format(
                         #     math.floor(time.time()), epoch_number, batch_number
                         # )

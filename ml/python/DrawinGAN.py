@@ -425,7 +425,7 @@ class Trainer:
         return dataloader, (len(dataset.samples) // batch_size)
     
 
-    def notebook_train(generator, discriminator, dataloader, n_batches, n_epochs=5):
+    def notebook_train(generator, discriminator, dataloader, n_batches, plotting_lib, n_epochs=5):
 
         to_image = transforms.ToPILImage()
 
@@ -504,6 +504,18 @@ class Trainer:
 
                     print(update_message)
 
+<<<<<<< HEAD
+=======
+                    n_rows = int(math.sqrt(batch_size))
+
+                    image_grid = vutils.make_grid(fake_images.clone().cpu(), nrow=n_rows, normalize=True, padding=0)
+                    image_grid = to_image(image_grid)
+
+                    image_grid
+
+
+
+>>>>>>> c907fb3f2b4ba3aa7fa00ac0ef90324ced40a6ce
                 
 
 if __name__ == "__main__":

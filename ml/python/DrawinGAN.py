@@ -261,15 +261,15 @@ class Trainer:
     def train(n_epochs, n_batches, dataloader, cuda_idx, models_dict=None):
         to_image = transforms.ToPILImage()
 
-        dd = Discriminator.DrawingDiscriminator(input_channels=1).cuda(cuda_idx)
-        dg = Generator.DrawingGenerator(Generator.ConvBlock, output_channels=1).cuda(cuda_idx)
+        downsampler = Discriminator.DrawingDiscriminator(input_channels=1).cuda(cuda_idx)
+        upsampler = Generator.DrawingGenerator(Generator.ConvBlock, output_channels=1).cuda(cuda_idx)
 
-        print("DD Params: ", dd.count_params())
-        print("DG Params: ", dg.count_params())
+        print("DD Params: ", downsampler.count_params())
+        print("DG Params: ", upsampler.count_params())
 
         if models_dict is not None:
-            dd.load_state_dict(models_dict["discriminator"])
-            dg.load_state_dict(models_dict["generator"])
+            downsampler.load_state_dict(models_dict["discriminator"])
+            upsampler.load_state_dict(models_dict["generator"])
 
         ae_criterion = nn.BCELoss(reduction="mean").cuda(cuda_idx)
         discriminator_criterion = nn.BCELoss(reduction="mean").cuda(cuda_idx)
@@ -282,8 +282,8 @@ class Trainer:
             if epoch_number % 10 == 0 and epoch_number != 0:
                 lr = lr / 1.1
 
-            dd_optimizer = torch.optim.Adam(dd.parameters(), lr=lr)
-            dg_optimizer = torch.optim.Adam(dg.parameters(), lr=lr)
+            dd_optimizer = torch.optim.Adam(downsampler.parameters(), lr=lr)
+            dg_optimizer = torch.optim.Adam(upsampler.parameters(), lr=lr)
 
             for batch_number, (data, label) in enumerate(dataloader):
 
@@ -321,11 +321,11 @@ class Trainer:
 
                 # Generate fake images
 
-                fake_images = dg(z, None, mode="generator")
+                fake_images = upsampler(z, None, mode="generator")
 
                 # Train on real
 
-                real_classification = dd(data, mode="discriminator")
+                real_classification = downsampler(data, mode="discriminator")
                 real_loss = discriminator_criterion(real_classification, real_label)
 
                 # real_loss = torch.tensor(0)
@@ -334,7 +334,7 @@ class Trainer:
 
                 # Train on fake
 
-                fake_classification = dd(fake_images.detach(), mode="discriminator")
+                fake_classification = downsampler(fake_images.detach(), mode="discriminator")
                 fake_loss = discriminator_criterion(fake_classification, fake_label)
 
                 # fake_loss = torch.tensor(0)
@@ -346,7 +346,7 @@ class Trainer:
 
                 # Train generator on how well it fooled discriminator
 
-                gen_classification = dd(fake_images, mode="discriminator")
+                gen_classification = downsampler(fake_images, mode="discriminator")
                 gen_loss = discriminator_criterion(gen_classification, real_label)
 
                 # gen_loss = torch.tensor(0)
@@ -406,8 +406,8 @@ class Trainer:
                     Trainer.save_images(tensors, paths, n_rows)
 
             # Per epoch
-            torch.save(dd.state_dict(), r"D:\MLModels\SimpleStyleGAN\{}-discriminator.pth".format(math.floor(time.time())))
-            torch.save(dg.state_dict(), r"D:\MLModels\SimpleStyleGAN\{}-generator.pth".format(math.floor(time.time())))
+            torch.save(downsampler.state_dict(), r"D:\MLModels\SimpleStyleGAN\{}-discriminator.pth".format(math.floor(time.time())))
+            torch.save(upsampler.state_dict(), r"D:\MLModels\SimpleStyleGAN\{}-generator.pth".format(math.floor(time.time())))
     
 
     def image_dataset(path, batch_size=3):
@@ -504,8 +504,6 @@ class Trainer:
 
                     print(update_message)
 
-<<<<<<< HEAD
-=======
                     n_rows = int(math.sqrt(batch_size))
 
                     image_grid = vutils.make_grid(fake_images.clone().cpu(), nrow=n_rows, normalize=True, padding=0)
@@ -515,7 +513,6 @@ class Trainer:
 
 
 
->>>>>>> c907fb3f2b4ba3aa7fa00ac0ef90324ced40a6ce
                 
 
 if __name__ == "__main__":

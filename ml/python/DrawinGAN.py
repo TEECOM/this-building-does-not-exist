@@ -122,7 +122,7 @@ class Generator:
                 data=torch.randn(1, latent_dim, 2, 2),
                 requires_grad=True
                 )
-
+            
             self.main = nn.Sequential()
 
             self.layer_params = [
@@ -144,7 +144,7 @@ class Generator:
                 last_layer = n == len(self.layer_params) - 1
 
                 if last_layer:
-                    layer.act = nn.Sigmoid()
+                    layer.act = nn.Sequential()
                 
                 self.main.add_module(name, layer)
         
@@ -161,14 +161,14 @@ class Generator:
             w = self.mapping_network(z)
 
             if mode == "generator":
-                const = self.constant.expand(nz, -1, -1, -1)
-
-                out = self.main(Container(const, w))
-                return out.x
-            if mode == "ae":
+                x = self.constant.expand(nz, -1, -1, -1)
 
                 out = self.main(Container(x, w))
-                return out.x
+                return torch.tanh(out.x)
+            if mode == "ae":        
+
+                out = self.main(Container(x, w))
+                return torch.sigmoid(out.x)
 
 
 class Discriminator:
@@ -277,7 +277,7 @@ class Trainer:
 
         for epoch_number in range(n_epochs):
 
-            lr = 9e-3
+            lr = 9e-4
 
             if epoch_number % 10 == 0 and epoch_number != 0:
                 lr = lr / 1.1
@@ -289,7 +289,11 @@ class Trainer:
 
                 batch_size, channels, height, width = data.shape
 
+                
+
                 data = data.cuda(cuda_idx)
+                data.sub_(.5).mul_(2)
+
                 data.requires_grad = True
 
                 real_label = torch.zeros(batch_size, 2).cuda(cuda_idx)
@@ -302,18 +306,18 @@ class Trainer:
 
                 z = torch.randn(batch_size, 512, 1, 1).cuda(cuda_idx)
 
-                encoded = dd(data, mode="ae")
-                decoded = dg(z, encoded, mode="ae")
+                # encoded = dd(data, mode="ae")
+                # decoded = dg(z, encoded, mode="ae")
 
-                reconstruction_loss = ae_criterion(decoded, data.detach())
+                # reconstruction_loss = ae_criterion(decoded, data.detach())
 
-                reconstruction_loss.backward()
+                # reconstruction_loss.backward()
 
-                dd_optimizer.step()
-                dg_optimizer.step()
+                # dd_optimizer.step()
+                # dg_optimizer.step()
 
-                dd_optimizer.zero_grad()
-                dg_optimizer.zero_grad()
+                # dd_optimizer.zero_grad()
+                # dg_optimizer.zero_grad()
 
                 # Generate fake images
 
@@ -383,7 +387,7 @@ class Trainer:
                     tensors = [
                         fake_images,
                         # data,
-                        decoded
+                        # decoded
                     ]
                     tensors = [t.clone().detach().cpu() for t in tensors]
 
@@ -394,9 +398,9 @@ class Trainer:
                         # r"D:\Images\SimpleStyleGAN\{}-{}-{}-real.png".format(
                         #     math.floor(time.time()), epoch_number, batch_number
                         # ),
-                        r"D:\Images\SimpleStyleGAN\{}-{}-{}-decoded.png".format(
-                            math.floor(time.time()), epoch_number, batch_number
-                        )
+                        # r"D:\Images\SimpleStyleGAN\{}-{}-{}-decoded.png".format(
+                        #     math.floor(time.time()), epoch_number, batch_number
+                        # )
                     ]
 
                     Trainer.save_images(tensors, paths, n_rows)
@@ -411,7 +415,7 @@ class Trainer:
         input_transform = transforms.Compose([
             transforms.Resize((1024, 1024)),
             transforms.Grayscale(1),
-            transforms.ToTensor()
+            transforms.ToTensor(),
         ])
 
         dataset = ImageFolder(path, transform=input_transform)
@@ -500,36 +504,22 @@ class Trainer:
 
                     print(update_message)
 
-                    n_rows = int(math.sqrt(batch_size))
-
-                    image_grid = vutils.make_grid(fake_images.clone().cpu(), nrow=n_rows, normalize=True, padding=0)
-                    image_grid = to_image(image_grid)
-
-                    
-                    plt.axis('off')
-                    plt.imshow(image_grid)
-
-
-
                 
 
 if __name__ == "__main__":
 
     data_root = r"D:\Datasets\ALotOfPlansModified"
 
-    model_root = r"D:\MLModels\SimpleStyleGAN"
+    model_root = r"D:\MLModels\SimpleStyleGAN\Good"
 
-    # models_dict = {
-    #     "discriminator": torch.load(model_root + r"\_1560939083-discriminator.pth"),
-    #     "generator": torch.load(model_root + r"\_1560939083-generator.pth")
-    # }
+    models_dict = {
+        "discriminator": torch.load(model_root + "\\1561070753-discriminator.pth"),
+        "generator": torch.load(model_root + "\\1561070753-generator.pth")
+    }
 
     dataloader, n_batches = Trainer.image_dataset(data_root, batch_size=4)
 
-    # Trainer.train(1000, n_batches, dataloader, 1, models_dict=None)
-
-    Trainer.notebook_train
-
+    Trainer.train(1000, n_batches, dataloader, 1, models_dict=models_dict)
 
 
 

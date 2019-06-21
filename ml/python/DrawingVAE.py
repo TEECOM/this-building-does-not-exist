@@ -119,7 +119,7 @@ class Decoder:
             if not self.last_layer:
                 return Container(nnf.leaky_relu(x, negative_slope=0.1), container.x_dict)
             else:
-                return Container(torch.tanh(x), container.x_dict)
+                return Container(torch.sigmoid(x), container.x_dict)
     
     class DrawingDecoder(nn.Module):
         def __init__(self, output_channels=3, latent_dim=512):

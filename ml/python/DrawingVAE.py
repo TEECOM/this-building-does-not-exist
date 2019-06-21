@@ -75,15 +75,17 @@ class Encoder:
 
                 self.main.add_module(name, layer)
 
-            self.fc = Encoder.D4Linear(latent_dim, latent_dim)
+            self.fc_mu = Encoder.D4Linear(latent_dim, latent_dim)
+            self.fc_sigma = Encoder.D4Linear(latent_dim, latent_dim)
 
         def forward(self, container):
             
             container = self.main(container)
 
-            x = self.fc(container.x)
+            x_mu = nnf.leaky_relu(self.fc_mu(container.x))
+            x_sigma = nnf.leaky_relu(self.fc_sigma(container.x))
 
-            return Container(nnf.leaky_relu(x, negative_slope=0.1), container.x_dict)
+            return Container((x_mu, x_sigma), container.x_dict)
 
 
 class Decoder:
@@ -117,7 +119,7 @@ class Decoder:
             if not self.last_layer:
                 return Container(nnf.leaky_relu(x, negative_slope=0.1), container.x_dict)
             else:
-                return Container(torch.tanh(x), container.x_dict)
+                return Container(torch.sigmoid(x), container.x_dict)
     
     class DrawingDecoder(nn.Module):
         def __init__(self, output_channels=3, latent_dim=512):
@@ -151,18 +153,30 @@ class Decoder:
         
 
         def forward(self, container):
-            x = nnf.leaky_relu(self.fc(container.x))
+            x_mu, x_sigma = container.x
+
+            nx, cx, hx, wx = x_mu.shape
+
+            norm_sample = torch.randn(nx, cx, hx, wx).cuda()
+
+            x = (norm_sample * x_sigma) + x_mu
+
+            x = nnf.leaky_relu(self.fc(x))
             container = self.main(Container(x, container.x_dict))
             return container.x
 
-if __name__ == "__main__":
-    de = Encoder.DrawingEncoder()
-    dd = Decoder.DrawingDecoder()
 
-    x = torch.randn(2, 3, 512, 512)
+if __name__ == "__main__":
+    de = Encoder.DrawingEncoder().cuda()
+    dd = Decoder.DrawingDecoder().cuda()
+
+    x = torch.randn(2, 3, 512, 512).cuda()
+    x.requires_grad = True
 
     enc = de(Container(x, {}))
     dec = dd(enc)
+
+    dec.mean().backward()
 
     print(de)
     print(dd)

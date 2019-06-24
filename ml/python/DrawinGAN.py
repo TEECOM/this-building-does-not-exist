@@ -163,6 +163,10 @@ class Generator:
             if mode == "generator":
                 x = self.constant.expand(nz, -1, -1, -1)
 
+                n = torch.randn_like(x)
+
+                x = x.clone() + n
+
                 out = self.main(Container(x, w))
                 return torch.tanh(out.x)
             if mode == "ae":        
@@ -275,9 +279,9 @@ class Trainer:
         discriminator_criterion = nn.BCELoss(reduction="mean").cuda(cuda_idx)
         generator_criterion = nn.BCELoss(reduction="mean").cuda(cuda_idx)
 
-        for epoch_number in range(n_epochs):
+        lr = 9e-3
 
-            lr = 9e-4
+        for epoch_number in range(n_epochs):
 
             if epoch_number % 10 == 0 and epoch_number != 0:
                 lr = lr / 1.1
@@ -386,7 +390,7 @@ class Trainer:
 
                     tensors = [
                         fake_images,
-                        # data,
+                        data,
                         # decoded
                     ]
                     tensors = [t.clone().detach().cpu() for t in tensors]
@@ -395,9 +399,9 @@ class Trainer:
                         r"D:\Images\SimpleStyleGAN\{}-{}-{}-fake.png".format(
                             math.floor(time.time()), epoch_number, batch_number
                         ),
-                        # r"D:\Images\SimpleStyleGAN\{}-{}-{}-real.png".format(
-                        #     math.floor(time.time()), epoch_number, batch_number
-                        # ),
+                        r"D:\Images\SimpleStyleGAN\{}-{}-{}-real.png".format(
+                            math.floor(time.time()), epoch_number, batch_number
+                        ),
                         # r"D:\Images\SimpleStyleGAN\{}-{}-{}-decoded.png".format(
                         #     math.floor(time.time()), epoch_number, batch_number
                         # )
@@ -517,7 +521,7 @@ class Trainer:
 
 if __name__ == "__main__":
 
-    data_root = r"D:\Datasets\ALotOfPlansModified"
+    data_root = r"C:\Users\tyler.kvochick\Documents\Datasets\ALotOfPlans"
 
     model_root = r"D:\MLModels\SimpleStyleGAN\Good"
 

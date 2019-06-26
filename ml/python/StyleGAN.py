@@ -1,10 +1,15 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as nnf
-#from torchviz import make_dot
-import matplotlib.pyplot as plt
+import torch.optim as optim
+import torch.cuda as tc
 from collections import OrderedDict as odict
-
+from torchvision.datasets import ImageFolder
+import torchvision.transforms as transforms
+import torchvision.utils as vutils
+from torch.utils.data import DataLoader
+import math
+import time
 
 class MappingNetwork(nn.Module):
     """
@@ -498,6 +503,7 @@ class Discriminator:
             x = self.conv1(x)
             x = self.act1(x)
             n, c, h, w = x.shape
+            # print(self.__class__, x.shape)
             x = self.fc(x.view(n, c * h * w))
 
             return x
@@ -671,7 +677,7 @@ class Discriminator:
             if num_layers > len(self.conv_blocks):
                 num_layers = len(self.conv_blocks)
             for n in range(num_layers):
-                name, layer = self.conv_blocks.pop()
+                name, layer = self.conv_blocks.pop(0)
                 self.main.add_module(name, layer)
             self.set_from_rgb_layer()
         
@@ -681,33 +687,39 @@ class Discriminator:
             if self.fade_in.has_fade_layer:
                 self.step_alpha()
                 xf = self.fade_in(x)
+                xf = self.main(xf)
+
                 xm = self.downsample(x)
                 xm = self.main(self.from_rgb(xm))
-                xf = self.main(xf)
                 return ((1.0 - self.alpha) * xm) + (xf * self.alpha)
 
-            return self.main(self.from_rgb(x))
+            else:
+                x = self.from_rgb(x)
+                return self.main(x)
 
-    def train(dataset, n_epochs=2):
-        N_BATCHES = len(dataset)
+    def train(dataset, n_batches, n_epochs=2):
 
-        sd = Discriminator.StyleDiscriminator(N_BATCHES)
-        sg = Generator.StyleGenerator(N_BATCHES)
+
+        sd = Discriminator.StyleDiscriminator(n_batches)
+        sg = Generator.StyleGenerator(n_batches)
 
         for epoch_number in range(n_epochs):
             sd.step_training_progression(epoch_number)
             sg.step_training_progression(epoch_number)
-            print(sd)
+
             sd.cuda()
-            print(sg)
             sg.cuda()
             for batch_number, (data, label) in enumerate(dataset):
 
-                z = torch.randn(1, 512, 1, 1, requires_grad=True).cuda()
+                batch_size = 4
 
-                out = sg.forward(1, z)
+                z = torch.randn(batch_size, 512, 1, 1, requires_grad=True).cuda()
+
+                out = sg.forward(batch_size, z)
                 print("OUT SHAPE {}".format(out.shape))
                 out = sd(out)
+
+                print(out.shape)
 
                 out = out.mean()
 
@@ -724,10 +736,171 @@ class Discriminator:
             print("EPOCH {:4d} DONE".format(epoch_number))
             print(10 * "-")
 
+
+class StyleGAN:
+    def make_label(batch_size, real_or_fake="real"):
+        label = torch.zeros(batch_size, 2)
+
+        if real_or_fake is "real":
+            label[:, 0] = 1.0
+        if real_or_fake is "fake":
+            label[:, 1] = 1.0
+        
+        return label
+
+    def train(dataloader, n_batches, n_epochs=9):
+
+        sd = Discriminator.StyleDiscriminator(n_batches)
+        sg = Generator.StyleGenerator(n_batches)
+
+        target_sizes = [2 ** s for s in range(n_epochs)][2:]
+
+        for epoch_number in range(n_epochs):
+            sd.step_training_progression(epoch_number)
+            sg.step_training_progression(epoch_number)
+
+            sd_criterion = nn.BCEWithLogitsLoss(reduction="mean").cuda()
+            sg_criterion = nn.BCEWithLogitsLoss(reduction="mean").cuda()
+
+            sd_optimizer = optim.Adam(sd.parameters(), 1e-4)
+            sg_optimizer = optim.Adam(sg.parameters(), 1e-4)
+
+            target_size = target_sizes.pop(0)
+
+            if target_size > 1024:
+                target_size = 1024
+            
+            print(sd)
+            print(sg)
+
+            for batch_number, (data, label) in enumerate(dataloader):
+
+                tc.empty_cache()
+
+                batch_size, c, h, w = data.shape
+
+                data = nnf.interpolate(data, size=(target_size, target_size), mode="bilinear", align_corners=True)
+
+                # ----------------------------
+                # Train Discriminator on Real
+                # ----------------------------
+                sd.cuda()
+                data = data.cuda()
+
+                low = torch.zeros(1).uniform_(.5, 1.0).item()
+
+                noise = data.clone().uniform_(low, 1.0)
+
+                data *= noise
+
+                data.requires_grad = True
+                label = StyleGAN.make_label(batch_size, "real").cuda()
+
+                out = sd(data)
+
+                d_loss_real = sd_criterion(out, label)
+
+                d_loss_real.backward()
+
+                # d_loss_real = torch.tensor(0)
+
+                # ----------------------------
+                # Generate fake samples
+                # ----------------------------
+
+                z = torch.randn(batch_size, 512, 1, 1, requires_grad=True).cuda()
+                sg.cuda()
+
+                fake_images = sg.forward(batch_size, z)
+
+                # ----------------------------
+                # Train Discriminator on Fake
+                # ----------------------------
+                out = sd(fake_images.detach())
+
+                label = StyleGAN.make_label(batch_size, "fake").cuda()
+
+                d_loss_fake = sd_criterion(out, label)
+
+                d_loss_fake.backward()
+
+                sd_optimizer.step()
+
+                # ----------------------------
+                # Train Generator with how well it fools Discriminator
+                # ----------------------------
+                label = StyleGAN.make_label(batch_size, "real").cuda()
+
+                out = sd(fake_images)
+                fake_images_loss = sg_criterion(out, label)
+
+                fake_images_loss.backward()
+                sg_optimizer.step()
+
+                sg.zero_grad()
+                sd.zero_grad()
+
+                
+                
+                if batch_number % 20 == 0:
+                    update_message = "Epoch: [{:4d}/{:4d}] Batch: [{:4d}/{:4d}] Losses: [Real: {:.4f} Fake: {:.4f} Generator {:.4f}"
+
+                    update_message = update_message.format(
+                        epoch_number,
+                        n_epochs,
+                        batch_number,
+                        n_batches,
+                        d_loss_real.item(),
+                        d_loss_fake.item(),
+                        fake_images_loss.item()
+                        )
+                    to_image = transforms.ToPILImage()
+                    # print("Data Shape: {}".format(data.shape))
+
+                    print("Fake Image Shape: {}".format(fake_images.shape))
+                    print(update_message)
+
+                    image_grid = vutils.make_grid(fake_images.clone().cpu(), nrow=1, normalize=True)
+                    image_grid = to_image(image_grid)
+
+                    image_grid.save(r"C:\Users\tyler.kvochick\Documents\Images\StyleGAN\{}-{}-{}-fake.png".format(
+                        math.floor(time.time()), epoch_number, batch_number)
+                        )
+
+                    image_grid = vutils.make_grid(data.clone().cpu(), nrow=1, normalize=True)
+                    image_grid = to_image(image_grid)
+
+                    image_grid.save(r"C:\Users\tyler.kvochick\Documents\Images\StyleGAN\{}-{}-{}-real.png".format(
+                        math.floor(time.time()), epoch_number, batch_number)
+                        )
+
+            print(10 * "-")
+            print("EPOCH {:4d} DONE".format(epoch_number))
+            print(10 * "-")
+    
+    def image_dataset(path, batch_size=3):
+
+        input_transform = transforms.Compose([
+            transforms.Resize((1024, 1024)),
+            transforms.ToTensor()
+        ])
+
+        dataset = ImageFolder(path, transform=input_transform)
+
+        dataloader = DataLoader(dataset, batch_size, num_workers=8)
+
+        return dataloader, (len(dataset.samples) // batch_size)
+
+
+
 if __name__ == "__main__":
 
-    fake_dataset = [(None, None) for _ in range(10)]
+    data_root = r"C:\Users\tyler.kvochick\Documents\Datasets\ALotOfPlans"
 
-    Discriminator.train(fake_dataset, n_epochs=9)
+    dataloader, n_batches = StyleGAN.image_dataset(path=data_root, batch_size=1)
+
+    StyleGAN.train(dataloader, n_batches, n_epochs=10)
+
+    # Discriminator.train(dataloader, n_batches, n_epochs=4)
 
 

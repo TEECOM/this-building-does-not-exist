@@ -11,6 +11,7 @@ import time
 from multiprocessing import Process
 from torchviz import make_dot
 import matplotlib.pyplot as plt
+import copy
 
 class MappingNetwork(nn.Module):
     def __init__(self, latent_dim=512, n_layers=8):
@@ -265,8 +266,8 @@ class Trainer:
     def train(n_epochs, n_batches, dataloader, cuda_idx, models_dict=None):
         to_image = transforms.ToPILImage()
 
-        downsampler = Discriminator.DrawingDiscriminator(input_channels=1).cuda(cuda_idx)
-        upsampler = Generator.DrawingGenerator(Generator.ConvBlock, output_channels=1).cuda(cuda_idx)
+        downsampler = Discriminator.DrawingDiscriminator(input_channels=1)
+        upsampler = Generator.DrawingGenerator(Generator.ConvBlock, output_channels=1)
 
         print("DD Params: ", downsampler.count_params())
         print("DG Params: ", upsampler.count_params())
@@ -274,17 +275,20 @@ class Trainer:
         if models_dict is not None:
             downsampler.load_state_dict(models_dict["discriminator"])
             upsampler.load_state_dict(models_dict["generator"])
+        
+        downsampler.cuda(cuda_idx)
+        upsampler.cuda(cuda_idx)
 
         ae_criterion = nn.BCELoss(reduction="mean").cuda(cuda_idx)
         discriminator_criterion = nn.BCELoss(reduction="mean").cuda(cuda_idx)
         generator_criterion = nn.BCELoss(reduction="mean").cuda(cuda_idx)
 
-        lr = 5e-4
+        lr = 5e-3
 
         for epoch_number in range(n_epochs):
 
-            if epoch_number % 100 == 0 and epoch_number != 0:
-                lr = lr / 1.1
+            # if epoch_number % 100 == 0 and epoch_number != 0:
+            #     lr = lr / 1.1
 
             dd_optimizer = torch.optim.Adam(downsampler.parameters(), lr=lr)
             dg_optimizer = torch.optim.Adam(upsampler.parameters(), lr=lr)
@@ -308,18 +312,18 @@ class Trainer:
 
                 z = torch.randn(batch_size, 512, 1, 1).cuda(cuda_idx)
 
-                # encoded = downsampler(data, mode="ae")
-                # decoded = upsampler(z, encoded, mode="ae")
+                encoded = downsampler(data, mode="ae")
+                decoded = upsampler(z, encoded, mode="ae")
 
-                # reconstruction_loss = ae_criterion(decoded, data.detach())
+                reconstruction_loss = ae_criterion(decoded, data.detach())
 
-                # reconstruction_loss.backward()
+                reconstruction_loss.backward()
 
-                # dd_optimizer.step()
-                # dg_optimizer.step()
+                dd_optimizer.step()
+                dg_optimizer.step()
 
-                # dd_optimizer.zero_grad()
-                # dg_optimizer.zero_grad()
+                dd_optimizer.zero_grad()
+                dg_optimizer.zero_grad()
 
                 # Generate fake images
 
@@ -408,8 +412,8 @@ class Trainer:
                     Trainer.save_images(tensors, paths, n_rows)
 
             # Per epoch
-            torch.save(downsampler.state_dict(), r"D:\MLModels\SimpleStyleGAN\{}-discriminator.pth".format(math.floor(time.time())))
-            torch.save(upsampler.state_dict(), r"D:\MLModels\SimpleStyleGAN\{}-generator.pth".format(math.floor(time.time())))
+            torch.save(copy.deepcopy(downsampler).cpu().state_dict(), r"D:\MLModels\SimpleStyleGAN\{}-discriminator.pth".format(math.floor(time.time())))
+            torch.save(copy.deepcopy(upsampler).cpu().state_dict(), r"D:\MLModels\SimpleStyleGAN\{}-generator.pth".format(math.floor(time.time())))
     
 
     def image_dataset(path, batch_size=3):
@@ -519,7 +523,7 @@ class Trainer:
 
 if __name__ == "__main__":
 
-    data_root = r"D:\Datasets\ALotOfPlansModified"
+    data_root = r"D:\Datasets\PlansAndROBIN"
 
     model_root = r"D:\MLModels\SimpleStyleGAN\Good"
 

@@ -165,7 +165,7 @@ class Generator:
 
                 n = torch.randn_like(x)
 
-                x = x.clone() + n
+                x = x.clone() * n
 
                 out = self.main(Container(x, w))
                 return torch.tanh(out.x)
@@ -279,11 +279,11 @@ class Trainer:
         discriminator_criterion = nn.BCELoss(reduction="mean").cuda(cuda_idx)
         generator_criterion = nn.BCELoss(reduction="mean").cuda(cuda_idx)
 
-        lr = 9e-3
+        lr = 5e-4
 
         for epoch_number in range(n_epochs):
 
-            if epoch_number % 10 == 0 and epoch_number != 0:
+            if epoch_number % 100 == 0 and epoch_number != 0:
                 lr = lr / 1.1
 
             dd_optimizer = torch.optim.Adam(downsampler.parameters(), lr=lr)
@@ -292,8 +292,6 @@ class Trainer:
             for batch_number, (data, label) in enumerate(dataloader):
 
                 batch_size, channels, height, width = data.shape
-
-                
 
                 data = data.cuda(cuda_idx)
                 data.sub_(.5).mul_(2)
@@ -310,8 +308,8 @@ class Trainer:
 
                 z = torch.randn(batch_size, 512, 1, 1).cuda(cuda_idx)
 
-                # encoded = dd(data, mode="ae")
-                # decoded = dg(z, encoded, mode="ae")
+                # encoded = downsampler(data, mode="ae")
+                # decoded = upsampler(z, encoded, mode="ae")
 
                 # reconstruction_loss = ae_criterion(decoded, data.detach())
 
@@ -521,7 +519,7 @@ class Trainer:
 
 if __name__ == "__main__":
 
-    data_root = r"C:\Users\tyler.kvochick\Documents\Datasets\ALotOfPlans"
+    data_root = r"D:\Datasets\ALotOfPlansModified"
 
     model_root = r"D:\MLModels\SimpleStyleGAN\Good"
 
